@@ -1,0 +1,4 @@
+This is a sample text file for testing GhostFS recovery capabilities.
+It contains multiple lines and various characters: !@#$%^&*()
+Unicode characters: ñáéíóú αβγδε 日本語
+Numbers: 1234567890

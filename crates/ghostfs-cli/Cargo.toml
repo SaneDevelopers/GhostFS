@@ -1,0 +1,13 @@
+[package]
+name = "ghostfs-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+indicatif = "0.17"
+serde = { version = "1", features = ["derive"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+ghostfs-core = { path = "../ghostfs-core" }
+tracing-subscriber = "0.3"

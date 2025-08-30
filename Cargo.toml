@@ -1,0 +1,8 @@
+[workspace]
+members = ["crates/ghostfs-core", "crates/ghostfs-cli"]
+resolver = "2"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }

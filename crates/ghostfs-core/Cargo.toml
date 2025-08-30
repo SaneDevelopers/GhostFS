@@ -1,0 +1,23 @@
+[package]
+name = "ghostfs-core"
+version = "0.1.0"
+edition = "2021"
+
+[[example]]
+name = "basic_scan"
+path = "../../examples/basic_scan.rs"
+
+[dependencies]
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+rayon = "1"
+nom = "7"
+# New core dependencies
+memmap2 = "0.9"                                    # Memory-mapped file access
+byteorder = "1.5"                                  # Endianness handling
+uuid = { version = "1.6", features = ["v4", "serde"] }  # Session IDs
+chrono = { version = "0.4", features = ["serde"] }      # Timestamps
+crc32fast = "1.3"                                  # Checksum verification
+encoding_rs = "0.8"                                # Text encoding (exFAT UTF-16)
+tracing = "0.1"                                    # Structured logging

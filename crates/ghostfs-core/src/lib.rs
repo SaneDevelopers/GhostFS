@@ -2,6 +2,8 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -220,4 +222,216 @@ pub fn scan_and_analyze(image_path: &Path, fs: FileSystemType, confidence_thresh
     );
     
     Ok(session)
+}
+
+/// Recover files from a session to the specified output directory
+pub fn recover_files(
+    image_path: &Path, 
+    session: &RecoverySession, 
+    output_dir: &Path,
+    file_ids: Option<Vec<u64>>,
+) -> Result<RecoveryReport> {
+    use std::fs::create_dir_all;
+    use memmap2::MmapOptions;
+    
+    // Create output directory if it doesn't exist
+    create_dir_all(output_dir)?;
+    
+    // Open the source image for reading
+    let source_file = std::fs::File::open(image_path)?;
+    let mmap = unsafe { MmapOptions::new().map(&source_file)? };
+    
+    let mut recovered_count = 0;
+    let mut failed_count = 0;
+    let mut total_bytes_recovered = 0u64;
+    let mut recovery_details = Vec::new();
+    
+    // Filter files to recover
+    let files_to_recover: Vec<&DeletedFile> = if let Some(ids) = file_ids {
+        session.scan_results.iter()
+            .filter(|f| ids.contains(&f.id))
+            .collect()
+    } else {
+        session.scan_results.iter()
+            .filter(|f| f.is_recoverable)
+            .collect()
+    };
+    
+    tracing::info!("Starting recovery of {} files to {}", files_to_recover.len(), output_dir.display());
+    
+    for deleted_file in &files_to_recover {
+        match recover_single_file(&mmap, deleted_file, output_dir, session.fs_type) {
+            Ok(bytes_recovered) => {
+                recovered_count += 1;
+                total_bytes_recovered += bytes_recovered;
+                recovery_details.push(FileRecoveryResult {
+                    file_id: deleted_file.id,
+                    original_path: deleted_file.original_path.clone(),
+                    recovered_path: generate_recovery_path(output_dir, deleted_file),
+                    size: deleted_file.size,
+                    bytes_recovered,
+                    status: RecoveryStatus::Success,
+                    confidence_score: deleted_file.confidence_score,
+                });
+                tracing::info!("✅ Recovered file ID {} ({} bytes)", deleted_file.id, bytes_recovered);
+            }
+            Err(e) => {
+                failed_count += 1;
+                recovery_details.push(FileRecoveryResult {
+                    file_id: deleted_file.id,
+                    original_path: deleted_file.original_path.clone(),
+                    recovered_path: generate_recovery_path(output_dir, deleted_file),
+                    size: deleted_file.size,
+                    bytes_recovered: 0,
+                    status: RecoveryStatus::Failed(e.to_string()),
+                    confidence_score: deleted_file.confidence_score,
+                });
+                tracing::warn!("❌ Failed to recover file ID {}: {}", deleted_file.id, e);
+            }
+        }
+    }
+    
+    let report = RecoveryReport {
+        total_files: files_to_recover.len(),
+        recovered_files: recovered_count,
+        failed_files: failed_count,
+        total_bytes_recovered,
+        output_directory: output_dir.to_path_buf(),
+        recovery_details,
+    };
+    
+    tracing::info!(
+        "Recovery complete: {}/{} files recovered, {} bytes total", 
+        recovered_count, 
+        files_to_recover.len(),
+        total_bytes_recovered
+    );
+    
+    Ok(report)
+}
+
+/// Recover a single file from the memory-mapped source
+fn recover_single_file(
+    mmap: &memmap2::Mmap,
+    deleted_file: &DeletedFile,
+    output_dir: &Path,
+    fs_type: FileSystemType,
+) -> Result<u64> {
+    let output_path = generate_recovery_path(output_dir, deleted_file);
+    let mut output_file = File::create(&output_path)?;
+    let mut bytes_written = 0u64;
+    
+    // Determine block size based on filesystem type
+    let block_size = match fs_type {
+        FileSystemType::Xfs => 4096,
+        FileSystemType::Btrfs => 4096,
+        FileSystemType::ExFat => 512,
+    };
+    
+    // Recover data from each block range
+    for block_range in &deleted_file.data_blocks {
+        let start_offset = block_range.start_block * block_size as u64;
+        let total_bytes = block_range.block_count * block_size as u64;
+        let end_offset = start_offset + total_bytes;
+        
+        // Make sure we don't read past the end of the image
+        if start_offset >= mmap.len() as u64 {
+            tracing::warn!("Block range starts beyond image bounds: {}", start_offset);
+            continue;
+        }
+        
+        let actual_end = std::cmp::min(end_offset, mmap.len() as u64);
+        let actual_bytes = actual_end - start_offset;
+        
+        // Also limit by the file's expected size
+        let remaining_file_bytes = deleted_file.size.saturating_sub(bytes_written);
+        let bytes_to_copy = std::cmp::min(actual_bytes, remaining_file_bytes);
+        
+        if bytes_to_copy > 0 {
+            let data_slice = &mmap[start_offset as usize..(start_offset + bytes_to_copy) as usize];
+            output_file.write_all(data_slice)?;
+            bytes_written += bytes_to_copy;
+            
+            tracing::debug!(
+                "Copied {} bytes from block range {}-{}", 
+                bytes_to_copy, 
+                block_range.start_block, 
+                block_range.start_block + block_range.block_count
+            );
+        }
+        
+        // Stop if we've recovered the expected file size
+        if bytes_written >= deleted_file.size {
+            break;
+        }
+    }
+    
+    output_file.flush()?;
+    
+    // Set file permissions if available
+    if let Some(permissions) = deleted_file.metadata.permissions {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(permissions);
+            std::fs::set_permissions(&output_path, perms)?;
+        }
+    }
+    
+    Ok(bytes_written)
+}
+
+/// Generate a recovery path for a deleted file
+fn generate_recovery_path(output_dir: &Path, deleted_file: &DeletedFile) -> PathBuf {
+    let filename = if let Some(ref original_path) = deleted_file.original_path {
+        // Use the original filename if available
+        original_path.file_name()
+            .and_then(|name| name.to_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("recovered_file_{}", deleted_file.id))
+    } else {
+        // Generate filename based on file type and metadata
+        let extension = deleted_file.metadata.file_extension
+            .as_ref()
+            .map(|ext| format!(".{}", ext))
+            .unwrap_or_else(|| match deleted_file.file_type {
+                FileType::RegularFile => ".dat".to_string(),
+                FileType::Directory => "".to_string(),
+                _ => ".unknown".to_string(),
+            });
+        
+        format!("recovered_file_{}{}", deleted_file.id, extension)
+    };
+    
+    output_dir.join(filename)
+}
+
+/// Recovery report with detailed results
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryReport {
+    pub total_files: usize,
+    pub recovered_files: usize,
+    pub failed_files: usize,
+    pub total_bytes_recovered: u64,
+    pub output_directory: PathBuf,
+    pub recovery_details: Vec<FileRecoveryResult>,
+}
+
+/// Individual file recovery result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileRecoveryResult {
+    pub file_id: u64,
+    pub original_path: Option<PathBuf>,
+    pub recovered_path: PathBuf,
+    pub size: u64,
+    pub bytes_recovered: u64,
+    pub status: RecoveryStatus,
+    pub confidence_score: f32,
+}
+
+/// Recovery status for individual files
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RecoveryStatus {
+    Success,
+    Failed(String),
 }

@@ -1,0 +1,217 @@
+GhostFS — XFS scan & recovery command reference
+Generated: 2025-09-02
+
+Overview
+--------
+This file contains the exact zsh commands you can run to build the project,
+detect filesystem types, scan an XFS image for recoverable files, recover files,
+and inspect recovered output. Each command block includes a short explanation,
+notes about common options, and recommended usage for debugging.
+
+Usage conventions
+-----------------
+- Run commands from the repository root (where `Cargo.toml` sits):
+	/Users/anmol/Documents/ghostfs
+- The examples assume zsh. Environment variable examples use that shell syntax.
+- The CLI binary is provided via `cargo run -p ghostfs-cli -- <args>` so you can
+	run the latest code without an explicit install. For release builds, use
+	`cargo build --release` and run the produced binary in `target/release/`.
+
+1) Build the project
+--------------------
+Purpose: compile the Rust workspace so the CLI and libraries are up-to-date.
+
+Command:
+```zsh
+cargo build
+```
+
+Explanation:
+- `cargo build` compiles all crates in the workspace using the development profile.
+- If you want an optimized executable, use `cargo build --release`.
+- Fix compilation errors reported by the compiler before proceeding.
+
+2) Show CLI help and subcommand usage
+-------------------------------------
+Purpose: see available commands and options.
+
+Commands:
+```zsh
+cargo run -p ghostfs-cli -- --help
+cargo run -p ghostfs-cli -- scan --help
+cargo run -p ghostfs-cli -- recover --help
+```
+
+Explanation:
+- Prints top-level CLI help and help for subcommands `scan` and `recover`.
+- Useful to confirm flags like `--confidence`, `--out`, and `--ids`.
+
+3) Detect filesystem type
+-------------------------
+Purpose: quickly detect the filesystem type of an image (optional sanity check).
+
+Command:
+```zsh
+cargo run -p ghostfs-cli -- detect path/to/image.img
+```
+
+Explanation:
+- The `detect` command probes the image superblock(s) and prints the filesystem
+	type (xfs, btrfs, exfat, etc.). This helps ensure you use the correct fs flag.
+
+4) Scan an XFS image for recoverable files
+-----------------------------------------
+Purpose: run the scanner to enumerate recoverable and candidate files.
+
+Basic command:
+```zsh
+cargo run -p ghostfs-cli -- scan test-data/test-xfs.img
+```
+
+Explanation:
+- Runs a full scan using the built-in recovery strategies and prints a session
+	summary with session ID, files found, and recoverable count.
+- Output includes progress logs and an informative final summary.
+
+Capture output to a log:
+```zsh
+cargo run -p ghostfs-cli -- scan test-data/test-xfs.img | tee scan.log
+```
+
+Notes:
+- If the CLI reports zero files but the XFS module logs found files, inspect the
+	runtime logs and confidence threshold (see section 7 below).
+
+5) Verbose / debug logging while scanning
+-----------------------------------------
+Purpose: show internal tracing for debugging (superblock parsing, signature
+matching, confidence calculation).
+
+Commands:
+```zsh
+# Info-level logs (recommended for normal runs)
+RUST_LOG=info cargo run -p ghostfs-cli -- scan test-data/test-xfs.img
+
+# Debug-level logs (very verbose; use only for troubleshooting)
+RUST_LOG=debug cargo run -p ghostfs-cli -- scan test-data/test-xfs.img
+```
+
+Explanation:
+- `RUST_LOG` controls the Rust `tracing` output level. Use `info` or `debug` to
+	see the XFS module logs, confidence scoring actions, and file merges.
+
+6) Recover all recoverable files to a directory
+----------------------------------------------
+Purpose: extract all files that pass the configured confidence threshold.
+
+Command:
+```zsh
+cargo run -p ghostfs-cli -- recover --out recovered_test_xfs/ test-data/test-xfs.img
+```
+
+Explanation:
+- `--out` specifies the output directory (will be created if missing).
+- The CLI will run a scan internally if no prior session is provided, then
+	recover files whose confidence score >= the configured threshold.
+
+7) Recover specific files by ID
+-------------------------------
+Purpose: extract one or more specific recovered files by their numeric IDs.
+
+Command:
+```zsh
+# recover only files with IDs 1 and 3
+cargo run -p ghostfs-cli -- recover --out recovered_test_xfs/ --ids 1,3 test-data/test-xfs.img
+```
+
+Explanation:
+- File IDs are shown in the scan/recover summary output (e.g. "1 -> recovered_file_1.txt").
+- Provide a comma-separated list for multiple IDs.
+
+8) Adjust confidence threshold for recovery
+-------------------------------------------
+Purpose: include lower-confidence matches when recovering (use with caution).
+
+Command:
+```zsh
+# lower threshold to 0.3 to keep weaker matches
+cargo run -p ghostfs-cli -- recover --confidence 0.3 --out recovered_test_xfs/ test-data/test-xfs.img
+```
+
+Explanation:
+- The CLI accepts a float between 0.0 and 1.0 for `--confidence`.
+- Lowering the threshold increases recovered candidates but raises false positives.
+
+9) Inspect recovered files and verify content
+--------------------------------------------
+Purpose: verify recovered output (file types, content preview, checksums).
+
+Commands:
+```zsh
+# List files
+ls -la recovered_test_xfs/
+
+# Quick content peek (first lines)
+head -n 40 recovered_test_xfs/recovered_file_1.txt
+head -n 200 recovered_test_xfs/recovered_file_2.json
+
+# Determine file type
+file recovered_test_xfs/recovered_file_2.json
+
+# View raw hex
+xxd recovered_test_xfs/recovered_file_2.json | head
+
+# Compute sha256 checksum
+shasum -a 256 recovered_test_xfs/recovered_file_2.json
+```
+
+Explanation:
+- `file` detects mime/type heuristics; `head` and `xxd` let you inspect content.
+- Compute checksums to compare recovered bytes against reference if you have one.
+
+10) Extract the Session ID from a saved scan log
+------------------------------------------------
+Purpose: find the scan session ID printed by the CLI for tracking.
+
+Command:
+```zsh
+grep 'Session ID:' scan.log | awk -F': ' '{print $2}'
+```
+
+Explanation:
+- The session ID is printed after a successful scan (UUID). The `recover`
+	command does not require the session id, but it can be useful for bookkeeping.
+
+11) Quick recommended workflow (example)
+---------------------------------------
+1. Build the project:
+```zsh
+cargo build
+```
+2. Run a scan with info logging and save the output:
+```zsh
+RUST_LOG=info cargo run -p ghostfs-cli -- scan test-data/test-xfs.img | tee scan.log
+```
+3. Review `scan.log` for found files and session summary. If satisfied, recover:
+```zsh
+cargo run -p ghostfs-cli -- recover --out recovered_test_xfs/ test-data/test-xfs.img
+```
+
+Notes and troubleshooting
+-------------------------
+- If no files are recovered but logs show found candidates, check the
+	confidence threshold. The default is 0.5; use `--confidence` to lower it.
+- Use `RUST_LOG=debug` only when necessary—debug output can be very large.
+- If the CLI errors during build, fix compiler errors or run `cargo clean`.
+- Recovered filenames may be synthetic (e.g. `recovered_file_1.txt`) if
+	original metadata was unavailable.
+
+Contact / next steps
+--------------------
+If you'd like, I can also:
+- Add a small zsh script `scripts/run-xfs-recover.sh` that automates scan ->
+	recover -> verify (I can create it and run it locally), or
+- Tweak the confidence scoring rules for XFS-specific heuristics.
+
+End of file
+

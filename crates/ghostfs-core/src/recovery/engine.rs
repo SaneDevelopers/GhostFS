@@ -175,6 +175,10 @@ impl RecoveryEngine {
             current_operation: "Recovery complete".to_string(),
         });
 
+        tracing::info!("🎯 Final recovery stats: {} total files, {} pass confidence threshold", 
+            self.recovered_files.len(), 
+            self.recovered_files.iter().filter(|f| f.confidence_score >= self.config.min_confidence_threshold).count());
+
         Ok(RecoveryResult {
             session_id: self.session_id.clone(),
             total_files_found: self.recovered_files.len(),
@@ -205,107 +209,61 @@ impl RecoveryEngine {
     }
 
     fn analyze_xfs_filesystem(&mut self) -> Result<FileSystemContext, RecoveryError> {
-        tracing::info!("RecoveryEngine: Starting FIXED XFS filesystem analysis");
-        
-        // BYPASS THE BROKEN XFS MODULE - CREATE WORKING FILES DIRECTLY
-        let file1 = crate::DeletedFile {
-            id: 1,
-            inode_or_cluster: 1001,
-            original_path: Some(std::path::PathBuf::from("document.txt")),
-            size: 200,
-            deletion_time: Some(chrono::Utc::now()),
-            confidence_score: 0.95, // High confidence to pass threshold
-            file_type: crate::FileType::RegularFile,
-            data_blocks: vec![crate::BlockRange {
-                start_block: 1, // Block 1 at offset 0x1000
-                block_count: 1,
-                is_allocated: false,
-            }],
-            is_recoverable: true,
-            metadata: crate::FileMetadata {
-                mime_type: Some("text/plain".to_string()),
-                file_extension: Some("txt".to_string()),
-                permissions: Some(0o644),
-                owner_uid: None,
-                owner_gid: None,
-                created_time: None,
-                modified_time: Some(chrono::Utc::now()),
-                accessed_time: None,
-                extended_attributes: std::collections::HashMap::new(),
-            },
-        };
-        
-        let file2 = crate::DeletedFile {
-            id: 2,
-            inode_or_cluster: 1002,
-            original_path: Some(std::path::PathBuf::from("config.ini")),
-            size: 120,
-            deletion_time: Some(chrono::Utc::now()),
-            confidence_score: 0.95, // High confidence to pass threshold
-            file_type: crate::FileType::RegularFile,
-            data_blocks: vec![crate::BlockRange {
-                start_block: 2, // Block 2 at offset 0x2000
-                block_count: 1,
-                is_allocated: false,
-            }],
-            is_recoverable: true,
-            metadata: crate::FileMetadata {
-                mime_type: Some("text/plain".to_string()),
-                file_extension: Some("ini".to_string()),
-                permissions: Some(0o644),
-                owner_uid: None,
-                owner_gid: None,
-                created_time: None,
-                modified_time: Some(chrono::Utc::now()),
-                accessed_time: None,
-                extended_attributes: std::collections::HashMap::new(),
-            },
-        };
-        
-        let file3 = crate::DeletedFile {
-            id: 3,
-            inode_or_cluster: 1003,
-            original_path: Some(std::path::PathBuf::from("data.json")),
-            size: 250,
-            deletion_time: Some(chrono::Utc::now()),
-            confidence_score: 0.95, // High confidence to pass threshold
-            file_type: crate::FileType::RegularFile,
-            data_blocks: vec![crate::BlockRange {
-                start_block: 3, // Block 3 at offset 0x3000
-                block_count: 1,
-                is_allocated: false,
-            }],
-            is_recoverable: true,
-            metadata: crate::FileMetadata {
-                mime_type: Some("application/json".to_string()),
-                file_extension: Some("json".to_string()),
-                permissions: Some(0o644),
-                owner_uid: None,
-                owner_gid: None,
-                created_time: None,
-                modified_time: Some(chrono::Utc::now()),
-                accessed_time: None,
-                extended_attributes: std::collections::HashMap::new(),
-            },
-        };
-        
-        // Add our working files directly
-        self.recovered_files.extend(vec![file1, file2, file3]);
-        
-        tracing::info!("RecoveryEngine: Added 3 working XFS test files with correct block locations");
-        
+        tracing::info!("RecoveryEngine: Starting XFS filesystem analysis (using xfs module)");
+
+        // Instantiate the XFS recovery engine and scan for deleted files
+        match self.create_block_device() {
+            Ok(device) => {
+                match crate::fs::xfs::XfsRecoveryEngine::new(device) {
+                    Ok(engine) => {
+                        match engine.scan_deleted_files() {
+                            Ok(mut files) => {
+                                tracing::info!("🔄 XFS engine returned {} files", files.len());
+                                // Merge scanned files into recovered_files
+                                self.recovered_files.append(&mut files);
+                                tracing::info!("🔄 Total recovered files after XFS merge: {}", self.recovered_files.len());
+                            }
+                            Err(e) => tracing::warn!("XFS scan_deleted_files failed: {:?}", e),
+                        }
+                    }
+                    Err(e) => tracing::warn!("Failed to create XFS recovery engine: {:?}", e),
+                }
+            }
+            Err(e) => tracing::warn!("Failed to create block device for XFS engine: {}", e),
+        }
+
+        // Return a generic FileSystemContext — real values should be derived from the XFS superblock
         Ok(FileSystemContext {
             fs_type: FileSystemType::Xfs,
             filesystem_health: 0.8,
             block_size: 4096,
-            total_blocks: 1000,
-            free_blocks: 500,
-            inode_count: 1000,
-            allocation_groups: Some(8),
+            total_blocks: 0,
+            free_blocks: 0,
+            inode_count: 0,
+            allocation_groups: None,
             journal_location: None,
             last_mount_time: None,
             activity_level: crate::recovery::ActivityLevel::Medium,
         })
+    }
+
+    /// Create a temporary BlockDevice by writing the in-memory mmap to a temp file
+    fn create_block_device(&self) -> Result<crate::fs::common::BlockDevice, RecoveryError> {
+        use std::io::Write;
+
+        let tmp_dir = std::env::temp_dir();
+        let tmp_path = tmp_dir.join(format!("ghostfs_recovery_{}.img", self.session_id));
+
+        // Write the memory-mapped data to a temporary file
+        let mut file = std::fs::File::create(&tmp_path)?;
+        file.write_all(&self.device_map[..])?;
+        file.sync_all()?;
+
+        // Open as BlockDevice
+        let bd = crate::fs::common::BlockDevice::open(&tmp_path)
+            .map_err(|e| RecoveryError::IoError(std::io::Error::new(std::io::ErrorKind::Other, format!("BlockDevice open failed: {}", e))))?;
+
+        Ok(bd)
     }
 
     fn analyze_btrfs_filesystem(&mut self) -> Result<FileSystemContext, RecoveryError> {
@@ -466,17 +424,31 @@ impl RecoveryEngine {
         };
 
         for file in &mut self.recovered_files {
-            file.confidence_score = calculate_confidence_score(file, &confidence_context);
+            let original_confidence = file.confidence_score;
+            let calculated_confidence = calculate_confidence_score(file, &confidence_context);
+            // Take the maximum of original and calculated confidence to preserve high-quality filesystem-specific scores
+            file.confidence_score = original_confidence.max(calculated_confidence);
+            tracing::info!("🎯 File {} confidence: {} -> {} (calculated: {})", 
+                file.id, original_confidence, file.confidence_score, calculated_confidence);
         }
 
         Ok(())
     }
 
     fn final_validation(&mut self) -> Result<(), RecoveryError> {
+        tracing::info!("🔍 Final validation: {} files before filtering (threshold: {})", 
+            self.recovered_files.len(), self.config.min_confidence_threshold);
+        
         // Filter out files below confidence threshold
         self.recovered_files.retain(|file| {
-            file.confidence_score >= self.config.min_confidence_threshold
+            let keep = file.confidence_score >= self.config.min_confidence_threshold;
+            if !keep {
+                tracing::info!("❌ Filtering out file {} with confidence {}", file.id, file.confidence_score);
+            }
+            keep
         });
+
+        tracing::info!("✅ Final validation: {} files after filtering", self.recovered_files.len());
 
         // Sort by confidence score (highest first)
         self.recovered_files.sort_by(|a, b| {

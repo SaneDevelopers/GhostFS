@@ -215,3 +215,10 @@ If you'd like, I can also:
 
 End of file
 
+
+
+
+
+cargo run -p ghostfs-cli -- scan test-data/test-xfs.img
+cargo run -p ghostfs-cli -- recover --help
+cargo run -p ghostfs-cli -- recover --out recovered_test_xfs/ test-data/test-xfs.img

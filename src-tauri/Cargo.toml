@@ -1,0 +1,34 @@
+[package]
+name = "ghostfs-gui"
+version = "0.1.0"
+description = "GhostFS Data Recovery Tool GUI"
+authors = ["GhostFS Team"]
+license = "MIT"
+repository = ""
+default-run = "ghostfs-gui"
+edition = "2021"
+rust-version = "1.70"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "2.0", features = [] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Include our existing GhostFS core
+ghostfs-core = { path = "../crates/ghostfs-core" }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[[bin]]
+name = "ghostfs-gui"
+path = "src/main.rs"

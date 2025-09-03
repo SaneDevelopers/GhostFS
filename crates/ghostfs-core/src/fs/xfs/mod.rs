@@ -897,7 +897,7 @@ pub fn get_filesystem_info(device: &BlockDevice) -> Result<String> {
         256
     };
 
-    let total_size_bytes = data_blocks * block_size as u64;
+    let total_size_bytes = data_blocks.saturating_mul(block_size as u64);
     let total_size_gb = total_size_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
 
     Ok(format!(

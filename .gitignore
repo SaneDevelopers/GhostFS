@@ -25,6 +25,23 @@ Thumbs.db
 /test-data/*.bin
 /test-data/*.raw
 
+# Node.js
+node_modules/
+node_modules\
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+package-lock.json
+.pnpm-debug.log*
+
+# Frontend build outputs
+gui-dist/
+dist/
+build/
+
 # Logs
 *.log
 

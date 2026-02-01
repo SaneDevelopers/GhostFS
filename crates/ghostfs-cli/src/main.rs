@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use ghostfs_core::{scan_and_analyze, RecoverySession, RecoveryEngine, FileSystemType};
+use ghostfs_core::{scan_and_analyze, FileSystemType};
 
 #[derive(Parser, Debug)]
 #[command(name = "ghostfs", version, about = "GhostFS CLI - Professional Data Recovery Tool")]

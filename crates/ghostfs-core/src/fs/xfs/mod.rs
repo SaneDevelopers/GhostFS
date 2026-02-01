@@ -9,10 +9,60 @@ const XFS_DINODE_FMT_EXTENTS: u8 = 1;
 const XFS_DINODE_FMT_BTREE: u8 = 2;
 const XFS_DINODE_FMT_LOCAL: u8 = 3;
 
-// XFS inode states
-const XFS_INODE_GOOD: u16 = 0;
-const XFS_INODE_FREE: u16 = 1;
-const XFS_INODE_UNLINKED: u16 = 2;
+// XFS inode states (reserved for future use)
+const _XFS_INODE_GOOD: u16 = 0;
+const _XFS_INODE_FREE: u16 = 1;
+const _XFS_INODE_UNLINKED: u16 = 2;
+
+/// Configuration for XFS recovery operations
+#[derive(Debug, Clone)]
+pub struct XfsRecoveryConfig {
+    /// Maximum blocks to scan in signature-based recovery.
+    /// None = scan all blocks (adaptive based on filesystem size)
+    pub max_scan_blocks: Option<u64>,
+    
+    /// Maximum bytes to search when estimating file sizes
+    /// Default: 10MB for large file support
+    pub max_file_search_bytes: usize,
+    
+    /// Threshold for text file detection (0.0-1.0)
+    /// Ratio of printable characters needed to classify as text
+    pub text_detection_threshold: f32,
+    
+    /// Sample size for text detection
+    pub text_sample_size: usize,
+}
+
+impl Default for XfsRecoveryConfig {
+    fn default() -> Self {
+        Self {
+            max_scan_blocks: None, // Adaptive: will scan intelligently based on FS size
+            max_file_search_bytes: 10 * 1024 * 1024, // 10MB
+            text_detection_threshold: 0.75, // 75% printable chars
+            text_sample_size: 4096, // 4KB sample
+        }
+    }
+}
+
+impl XfsRecoveryConfig {
+    /// Calculate adaptive scan limit based on filesystem size
+    /// Scans more on smaller filesystems, uses sampling on larger ones
+    pub fn adaptive_scan_blocks(&self, total_blocks: u64) -> u64 {
+        if let Some(max) = self.max_scan_blocks {
+            return std::cmp::min(total_blocks, max);
+        }
+        
+        // Adaptive strategy:
+        // - Small FS (<1GB): scan all blocks
+        // - Medium FS (1GB-100GB): scan 10% minimum 10k blocks
+        // - Large FS (>100GB): scan 1% minimum 100k blocks
+        match total_blocks {
+            0..=262_144 => total_blocks, // <1GB: scan all
+            262_145..=26_214_400 => std::cmp::max(total_blocks / 10, 10_000), // 1-100GB: 10%
+            _ => std::cmp::max(total_blocks / 100, 100_000), // >100GB: 1%
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct XfsSuperblock {
@@ -60,11 +110,16 @@ pub struct XfsRecoveryEngine {
     inode_size: u16,
     inodes_per_block: u16,
     ag_inode_table_blocks: Vec<u64>, // Starting block of inode table for each AG
+    config: XfsRecoveryConfig,
 }
 
 impl XfsRecoveryEngine {
     pub fn new(device: BlockDevice) -> Result<Self> {
-        tracing::info!("� Initializing XFS Recovery Engine");
+        Self::new_with_config(device, XfsRecoveryConfig::default())
+    }
+    
+    pub fn new_with_config(device: BlockDevice, config: XfsRecoveryConfig) -> Result<Self> {
+        tracing::info!("🔧 Initializing XFS Recovery Engine");
         
         let mut engine = XfsRecoveryEngine {
             device,
@@ -76,6 +131,7 @@ impl XfsRecoveryEngine {
             inode_size: 256,
             inodes_per_block: 16,
             ag_inode_table_blocks: Vec::new(),
+            config,
         };
         
         // Parse the XFS superblock
@@ -571,9 +627,17 @@ impl XfsRecoveryEngine {
         ];
 
         // Scan through the device looking for file signatures
-        let chunk_size = self.block_size as usize;
         let total_blocks = self.device.size() / self.block_size as u64;
-        let scan_blocks = std::cmp::min(total_blocks, 1000); // Limit scan for performance
+        let scan_blocks = self.config.adaptive_scan_blocks(total_blocks);
+        
+        tracing::info!("📊 Filesystem size: {} blocks ({:.2} GB)", 
+            total_blocks, 
+            (total_blocks * self.block_size as u64) as f64 / (1024.0 * 1024.0 * 1024.0)
+        );
+        tracing::info!("🔍 Adaptive scan: {} blocks ({:.1}%)", 
+            scan_blocks, 
+            (scan_blocks as f64 / total_blocks as f64) * 100.0
+        );
 
         for block_num in 0..scan_blocks {
             if let Ok(block_data) = self.device.read_block(block_num, self.block_size) {
@@ -644,7 +708,9 @@ impl XfsRecoveryEngine {
                 let mut in_string = false;
                 let mut escape_next = false;
                 
-                for (i, &byte) in block_data.iter().enumerate() {
+                let search_limit = std::cmp::min(block_data.len(), self.config.max_file_search_bytes);
+                
+                for (i, &byte) in block_data.iter().take(search_limit).enumerate() {
                     if escape_next {
                         escape_next = false;
                         continue;
@@ -662,13 +728,9 @@ impl XfsRecoveryEngine {
                         }
                         _ => {}
                     }
-                    
-                    if i > 8192 { // Limit search
-                        break;
-                    }
                 }
                 
-                block_data.len() as u64
+                std::cmp::min(block_data.len(), search_limit) as u64
             }
             _ => {
                 // Default: use the entire block or look for null padding
@@ -705,11 +767,13 @@ impl XfsRecoveryEngine {
             }
             
             // Check if it's plain text
-            let text_chars = data.iter().take(512).filter(|&&b| {
+            let sample_size = std::cmp::min(data.len(), self.config.text_sample_size);
+            let text_chars = data.iter().take(sample_size).filter(|&&b| {
                 (b >= 32 && b <= 126) || b == b'\n' || b == b'\r' || b == b'\t'
             }).count();
             
-            if text_chars > 400 { // More than 400/512 chars are printable
+            let text_ratio = text_chars as f32 / sample_size as f32;
+            if text_ratio >= self.config.text_detection_threshold {
                 return (Some("text/plain".to_string()), Some("txt".to_string()));
             }
         }

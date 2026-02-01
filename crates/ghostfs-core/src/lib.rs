@@ -17,6 +17,9 @@ pub use recovery::{
     FileSignature, SignatureAnalysisResult
 };
 
+// Re-export XFS recovery config for advanced users
+pub use fs::xfs::XfsRecoveryConfig;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileSystemType {
     Xfs,

@@ -445,9 +445,8 @@ impl XfsRecoveryEngine {
         let mtime = i32::from_be_bytes([inode_data[80], inode_data[81], inode_data[82], inode_data[83]]);
         let ctime = i32::from_be_bytes([inode_data[88], inode_data[89], inode_data[90], inode_data[91]]);
 
-        // Check if this looks like a deleted file
-        // Heuristics: onlink == 0 (unlinked), reasonable size, valid timestamps
-        let is_deleted = onlink == 0 && size > 0 && size < (1024 * 1024 * 1024) && nblocks > 0;
+        // Enhanced deleted file detection with multiple heuristics
+        let is_deleted = self.is_likely_deleted_file(mode, onlink, size, nblocks, atime, mtime, ctime);
         
         if !is_deleted {
             return Ok(None);
@@ -525,6 +524,75 @@ impl XfsRecoveryEngine {
         };
 
         Ok(Some(deleted_file))
+    }
+
+    /// Enhanced deleted file detection using multiple heuristics
+    /// This reduces false positives and catches more edge cases
+    fn is_likely_deleted_file(
+        &self, 
+        mode: u16, 
+        onlink: u16, 
+        size: u64, 
+        nblocks: u64,
+        _atime: i32,
+        mtime: i32,
+        ctime: i32
+    ) -> bool {
+        // PRIMARY INDICATOR: Link count is 0 (no directory entries point to this inode)
+        if onlink != 0 {
+            return false; // File still has directory entries, not deleted
+        }
+
+        // SANITY CHECKS: File must have meaningful content
+        if size == 0 || nblocks == 0 {
+            return false; // Empty inode or no data blocks
+        }
+
+        // CHECK 1: Mode field validation
+        // Deleted files usually still have valid mode (file type + permissions)
+        // mode == 0 typically means inode was freed and zeroed out
+        let file_type = mode & 0xF000;
+        let is_valid_type = matches!(
+            file_type,
+            0x8000 | // Regular file
+            0x4000 | // Directory  
+            0xA000   // Symlink
+        );
+        
+        if !is_valid_type {
+            return false; // Invalid or zeroed file type
+        }
+
+        // CHECK 2: Timestamp validation
+        // Valid timestamps indicate the inode held real data
+        let has_valid_timestamps = (mtime > 0 || ctime > 0) && mtime < 2147483647; // Before year 2038
+        if !has_valid_timestamps {
+            return false; // Suspicious timestamps
+        }
+
+        // CHECK 3: Size/block consistency
+        // Verify the file size makes sense for the number of blocks allocated
+        let expected_blocks = (size + self.block_size as u64 - 1) / self.block_size as u64;
+        let blocks_reasonable = nblocks <= expected_blocks * 2; // Allow some slack for metadata
+        
+        if !blocks_reasonable {
+            return false; // Block count doesn't match file size (corrupted inode)
+        }
+
+        // CHECK 4: Remove artificial size limit
+        // Previous code limited to 1GB, but we should allow larger files
+        // Only reject truly unreasonable sizes (> 16TB as sanity check)
+        const MAX_REASONABLE_SIZE: u64 = 16 * 1024 * 1024 * 1024 * 1024; // 16TB
+        if size > MAX_REASONABLE_SIZE {
+            return false; // Unreasonably large, likely corrupted
+        }
+
+        // CHECK 5: Timestamp freshness (optional heuristic)
+        // Files deleted very long ago might have been partially overwritten
+        // But we still want to find them, so this is just for confidence scoring
+        
+        // All checks passed - this is likely a recoverable deleted file
+        true
     }
 
     /// Extract data block references from inode based on its format

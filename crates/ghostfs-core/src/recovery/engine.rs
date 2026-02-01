@@ -21,6 +21,7 @@ pub struct RecoveryConfig {
     pub signature_validation: bool,
     pub metadata_reconstruction: bool,
     pub parallel_processing: bool,
+    pub xfs_config: Option<crate::fs::xfs::XfsRecoveryConfig>,
 }
 
 impl Default for RecoveryConfig {
@@ -38,6 +39,7 @@ impl Default for RecoveryConfig {
             signature_validation: true,
             metadata_reconstruction: true,
             parallel_processing: true,
+            xfs_config: None, // Use adaptive defaults
         }
     }
 }
@@ -214,7 +216,16 @@ impl RecoveryEngine {
         // Instantiate the XFS recovery engine and scan for deleted files
         match self.create_block_device() {
             Ok(device) => {
-                match crate::fs::xfs::XfsRecoveryEngine::new(device) {
+                let xfs_engine = if let Some(ref xfs_config) = self.config.xfs_config {
+                    // Use custom XFS config
+                    tracing::info!("Using custom XFS recovery configuration");
+                    crate::fs::xfs::XfsRecoveryEngine::new_with_config(device, xfs_config.clone())
+                } else {
+                    // Use adaptive defaults
+                    crate::fs::xfs::XfsRecoveryEngine::new(device)
+                };
+                
+                match xfs_engine {
                     Ok(engine) => {
                         match engine.scan_deleted_files() {
                             Ok(mut files) => {

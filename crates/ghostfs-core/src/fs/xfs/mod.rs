@@ -961,7 +961,7 @@ pub fn get_filesystem_info(device: &BlockDevice) -> Result<String> {
         256
     };
 
-    let total_size_bytes = data_blocks * block_size as u64;
+    let total_size_bytes = data_blocks.saturating_mul(block_size as u64);
     let total_size_gb = total_size_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
 
     Ok(format!(
@@ -981,6 +981,27 @@ pub fn get_filesystem_info(device: &BlockDevice) -> Result<String> {
         inode_size,
         magic
     ))
+}
+
+/// Get filesystem size information (total_blocks, block_size)
+pub fn get_filesystem_size(device: &BlockDevice) -> Result<(u64, u32)> {
+    let data = device.read_sector(0)?;
+    
+    if data.len() < 16 {
+        anyhow::bail!("Insufficient data to read XFS superblock");
+    }
+    
+    let magic = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+    if magic != XFS_MAGIC {
+        anyhow::bail!("Not a valid XFS filesystem");
+    }
+    
+    let block_size = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
+    let data_blocks = u64::from_be_bytes([
+        data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]
+    ]);
+    
+    Ok((data_blocks, block_size))
 }
 
 /// Check if the provided data contains a valid XFS superblock

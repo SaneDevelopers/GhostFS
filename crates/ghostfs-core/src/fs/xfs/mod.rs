@@ -749,10 +749,19 @@ impl XfsRecoveryEngine {
             total_blocks, 
             (total_blocks * self.block_size as u64) as f64 / (1024.0 * 1024.0 * 1024.0)
         );
-        tracing::info!("🔍 Adaptive scan: {} blocks ({:.1}%)", 
-            scan_blocks, 
-            (scan_blocks as f64 / total_blocks as f64) * 100.0
-        );
+        if total_blocks > 0 {
+            tracing::info!(
+                "🔍 Adaptive scan: {} blocks ({:.1}%)",
+                scan_blocks,
+                (scan_blocks as f64 / total_blocks as f64) * 100.0
+            );
+        } else {
+            // Avoid division by zero when the filesystem has zero blocks
+            tracing::info!(
+                "🔍 Adaptive scan: {} blocks (0.0%) - total filesystem blocks is 0",
+                scan_blocks
+            );
+        }
 
         for block_num in 0..scan_blocks {
             if let Ok(block_data) = self.device.read_block(block_num, self.block_size) {

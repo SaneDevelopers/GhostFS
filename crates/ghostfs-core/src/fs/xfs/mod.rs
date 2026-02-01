@@ -9,10 +9,60 @@ const XFS_DINODE_FMT_EXTENTS: u8 = 1;
 const XFS_DINODE_FMT_BTREE: u8 = 2;
 const XFS_DINODE_FMT_LOCAL: u8 = 3;
 
-// XFS inode states
-const XFS_INODE_GOOD: u16 = 0;
-const XFS_INODE_FREE: u16 = 1;
-const XFS_INODE_UNLINKED: u16 = 2;
+// XFS inode states (reserved for future use)
+const _XFS_INODE_GOOD: u16 = 0;
+const _XFS_INODE_FREE: u16 = 1;
+const _XFS_INODE_UNLINKED: u16 = 2;
+
+/// Configuration for XFS recovery operations
+#[derive(Debug, Clone)]
+pub struct XfsRecoveryConfig {
+    /// Maximum blocks to scan in signature-based recovery.
+    /// None = scan all blocks (adaptive based on filesystem size)
+    pub max_scan_blocks: Option<u64>,
+    
+    /// Maximum bytes to search when estimating file sizes
+    /// Default: 10MB for large file support
+    pub max_file_search_bytes: usize,
+    
+    /// Threshold for text file detection (0.0-1.0)
+    /// Ratio of printable characters needed to classify as text
+    pub text_detection_threshold: f32,
+    
+    /// Sample size for text detection
+    pub text_sample_size: usize,
+}
+
+impl Default for XfsRecoveryConfig {
+    fn default() -> Self {
+        Self {
+            max_scan_blocks: None, // Adaptive: will scan intelligently based on FS size
+            max_file_search_bytes: 10 * 1024 * 1024, // 10MB
+            text_detection_threshold: 0.75, // 75% printable chars
+            text_sample_size: 4096, // 4KB sample
+        }
+    }
+}
+
+impl XfsRecoveryConfig {
+    /// Calculate adaptive scan limit based on filesystem size
+    /// Scans more on smaller filesystems, uses sampling on larger ones
+    pub fn adaptive_scan_blocks(&self, total_blocks: u64) -> u64 {
+        if let Some(max) = self.max_scan_blocks {
+            return std::cmp::min(total_blocks, max);
+        }
+        
+        // Adaptive strategy:
+        // - Small FS (<1GB): scan all blocks
+        // - Medium FS (1GB-100GB): scan 10% minimum 10k blocks
+        // - Large FS (>100GB): scan 1% minimum 100k blocks
+        match total_blocks {
+            0..=262_144 => total_blocks, // <1GB: scan all
+            262_145..=26_214_400 => std::cmp::max(total_blocks / 10, 10_000), // 1-100GB: 10%
+            _ => std::cmp::max(total_blocks / 100, 100_000), // >100GB: 1%
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct XfsSuperblock {
@@ -60,11 +110,16 @@ pub struct XfsRecoveryEngine {
     inode_size: u16,
     inodes_per_block: u16,
     ag_inode_table_blocks: Vec<u64>, // Starting block of inode table for each AG
+    config: XfsRecoveryConfig,
 }
 
 impl XfsRecoveryEngine {
     pub fn new(device: BlockDevice) -> Result<Self> {
-        tracing::info!("� Initializing XFS Recovery Engine");
+        Self::new_with_config(device, XfsRecoveryConfig::default())
+    }
+    
+    pub fn new_with_config(device: BlockDevice, config: XfsRecoveryConfig) -> Result<Self> {
+        tracing::info!("🔧 Initializing XFS Recovery Engine");
         
         let mut engine = XfsRecoveryEngine {
             device,
@@ -76,6 +131,7 @@ impl XfsRecoveryEngine {
             inode_size: 256,
             inodes_per_block: 16,
             ag_inode_table_blocks: Vec::new(),
+            config,
         };
         
         // Parse the XFS superblock
@@ -368,9 +424,16 @@ impl XfsRecoveryEngine {
 
         // Parse inode core structure
         let mode = u16::from_be_bytes([inode_data[2], inode_data[3]]);
-        let _version = inode_data[4];
+        let version = inode_data[4];
         let format = inode_data[5];
         let onlink = u16::from_be_bytes([inode_data[6], inode_data[7]]);
+        
+        // Generation number (helps detect reused inodes)
+        let gen = u32::from_be_bytes([inode_data[8], inode_data[9], inode_data[10], inode_data[11]]);
+        
+        // UID/GID for ownership info
+        let uid = u32::from_be_bytes([inode_data[24], inode_data[25], inode_data[26], inode_data[27]]);
+        let gid = u32::from_be_bytes([inode_data[28], inode_data[29], inode_data[30], inode_data[31]]);
         
         // File size (64-bit)
         let size = u64::from_be_bytes([
@@ -389,9 +452,11 @@ impl XfsRecoveryEngine {
         let mtime = i32::from_be_bytes([inode_data[80], inode_data[81], inode_data[82], inode_data[83]]);
         let ctime = i32::from_be_bytes([inode_data[88], inode_data[89], inode_data[90], inode_data[91]]);
 
-        // Check if this looks like a deleted file
-        // Heuristics: onlink == 0 (unlinked), reasonable size, valid timestamps
-        let is_deleted = onlink == 0 && size > 0 && size < (1024 * 1024 * 1024) && nblocks > 0;
+        // Enhanced deleted file detection with multiple heuristics
+        let is_deleted = self.is_likely_deleted_file(
+            mode, onlink, size, nblocks, atime, mtime, ctime, 
+            version, format, gen, uid, gid
+        );
         
         if !is_deleted {
             return Ok(None);
@@ -459,8 +524,8 @@ impl XfsRecoveryEngine {
                 mime_type,
                 file_extension: extension,
                 permissions: Some(mode as u32 & 0o777),
-                owner_uid: None, // Could be extracted from inode if needed
-                owner_gid: None,
+                owner_uid: Some(uid),
+                owner_gid: Some(gid),
                 created_time: deletion_time, // Use ctime as creation time
                 modified_time,
                 accessed_time,
@@ -469,6 +534,112 @@ impl XfsRecoveryEngine {
         };
 
         Ok(Some(deleted_file))
+    }
+
+    /// Enhanced deleted file detection using multiple heuristics
+    /// This reduces false positives and catches more edge cases
+    fn is_likely_deleted_file(
+        &self, 
+        mode: u16, 
+        onlink: u16, 
+        size: u64, 
+        nblocks: u64,
+        _atime: i32,
+        mtime: i32,
+        ctime: i32,
+        version: u8,
+        format: u8,
+        gen: u32,
+        uid: u32,
+        gid: u32,
+    ) -> bool {
+        // PRIMARY INDICATOR: Link count is 0 (no directory entries point to this inode)
+        if onlink != 0 {
+            return false; // File still has directory entries, not deleted
+        }
+
+        // SANITY CHECKS: File must have meaningful content
+        if size == 0 || nblocks == 0 {
+            return false; // Empty inode or no data blocks
+        }
+
+        // CHECK 1: Mode field validation
+        // Deleted files usually still have valid mode (file type + permissions)
+        // mode == 0 typically means inode was freed and zeroed out
+        let file_type = mode & 0xF000;
+        let is_valid_type = matches!(
+            file_type,
+            0x8000 | // Regular file
+            0x4000 | // Directory  
+            0xA000   // Symlink
+        );
+        
+        if !is_valid_type {
+            return false; // Invalid or zeroed file type
+        }
+
+        // CHECK 2: Timestamp validation
+        // Valid timestamps indicate the inode held real data
+        let has_valid_timestamps = (mtime > 0 || ctime > 0) && mtime < 2147483647; // Before year 2038
+        if !has_valid_timestamps {
+            return false; // Suspicious timestamps
+        }
+
+        // CHECK 3: Size/block consistency
+        // Verify the file size makes sense for the number of blocks allocated
+        let expected_blocks = (size + self.block_size as u64 - 1) / self.block_size as u64;
+        let blocks_reasonable = nblocks <= expected_blocks * 2; // Allow some slack for metadata
+        
+        if !blocks_reasonable {
+            return false; // Block count doesn't match file size (corrupted inode)
+        }
+
+        // CHECK 4: Remove artificial size limit
+        // Previous code limited to 1GB, but we should allow larger files
+        // Only reject truly unreasonable sizes (> 16TB as sanity check)
+        const MAX_REASONABLE_SIZE: u64 = 16 * 1024 * 1024 * 1024 * 1024; // 16TB
+        if size > MAX_REASONABLE_SIZE {
+            return false; // Unreasonably large, likely corrupted
+        }
+
+        // CHECK 5: XFS version validation
+        // XFS inode versions: 1 (old), 2 (v4), 3 (v5 with CRC)
+        if version == 0 || version > 3 {
+            return false; // Invalid inode version
+        }
+
+        // CHECK 6: Format field validation
+        // Format must be valid for XFS: extents (1), btree (2), or local (3)
+        if format == 0 || format > 3 {
+            return false; // Invalid data fork format
+        }
+
+        // CHECK 7: Generation number check
+        // Generation 0 is suspicious (newly created inode or corrupted)
+        // Very high generation numbers might indicate corruption
+        if gen == 0 || gen > 1_000_000 {
+            return false; // Suspicious generation number
+        }
+
+        // CHECK 8: UID/GID sanity check
+        // 0xFFFFFFFF often means uninitialized/corrupted ownership fields
+        if uid == 0xFFFFFFFF || gid == 0xFFFFFFFF {
+            return false; // Suspicious ownership (likely uninitialized)
+        }
+
+        // CHECK 9: Format consistency with file type
+
+        // CHECK 9: Format consistency with file type
+        // Directories shouldn't use local format for large sizes
+        if file_type == 0x4000 && format == XFS_DINODE_FMT_LOCAL && size > 256 {
+            return false; // Directory too large for local format
+        }
+// CHECK 5: Timestamp freshness (optional heuristic)
+        // Files deleted very long ago might have been partially overwritten
+        // But we still want to find them, so this is just for confidence scoring
+        
+        // All checks passed - this is likely a recoverable deleted file
+        true
     }
 
     /// Extract data block references from inode based on its format
@@ -571,9 +742,26 @@ impl XfsRecoveryEngine {
         ];
 
         // Scan through the device looking for file signatures
-        let chunk_size = self.block_size as usize;
         let total_blocks = self.device.size() / self.block_size as u64;
-        let scan_blocks = std::cmp::min(total_blocks, 1000); // Limit scan for performance
+        let scan_blocks = self.config.adaptive_scan_blocks(total_blocks);
+        
+        tracing::info!("📊 Filesystem size: {} blocks ({:.2} GB)", 
+            total_blocks, 
+            (total_blocks * self.block_size as u64) as f64 / (1024.0 * 1024.0 * 1024.0)
+        );
+        if total_blocks > 0 {
+            tracing::info!(
+                "🔍 Adaptive scan: {} blocks ({:.1}%)",
+                scan_blocks,
+                (scan_blocks as f64 / total_blocks as f64) * 100.0
+            );
+        } else {
+            // Avoid division by zero when the filesystem has zero blocks
+            tracing::info!(
+                "🔍 Adaptive scan: {} blocks (0.0%) - total filesystem blocks is 0",
+                scan_blocks
+            );
+        }
 
         for block_num in 0..scan_blocks {
             if let Ok(block_data) = self.device.read_block(block_num, self.block_size) {
@@ -644,7 +832,9 @@ impl XfsRecoveryEngine {
                 let mut in_string = false;
                 let mut escape_next = false;
                 
-                for (i, &byte) in block_data.iter().enumerate() {
+                let search_limit = std::cmp::min(block_data.len(), self.config.max_file_search_bytes);
+                
+                for (i, &byte) in block_data.iter().take(search_limit).enumerate() {
                     if escape_next {
                         escape_next = false;
                         continue;
@@ -662,13 +852,9 @@ impl XfsRecoveryEngine {
                         }
                         _ => {}
                     }
-                    
-                    if i > 8192 { // Limit search
-                        break;
-                    }
                 }
                 
-                block_data.len() as u64
+                std::cmp::min(block_data.len(), search_limit) as u64
             }
             _ => {
                 // Default: use the entire block or look for null padding
@@ -705,11 +891,13 @@ impl XfsRecoveryEngine {
             }
             
             // Check if it's plain text
-            let text_chars = data.iter().take(512).filter(|&&b| {
+            let sample_size = std::cmp::min(data.len(), self.config.text_sample_size);
+            let text_chars = data.iter().take(sample_size).filter(|&&b| {
                 (b >= 32 && b <= 126) || b == b'\n' || b == b'\r' || b == b'\t'
             }).count();
             
-            if text_chars > 400 { // More than 400/512 chars are printable
+            let text_ratio = text_chars as f32 / sample_size as f32;
+            if text_ratio >= self.config.text_detection_threshold {
                 return (Some("text/plain".to_string()), Some("txt".to_string()));
             }
         }
@@ -897,7 +1085,7 @@ pub fn get_filesystem_info(device: &BlockDevice) -> Result<String> {
         256
     };
 
-    let total_size_bytes = data_blocks * block_size as u64;
+    let total_size_bytes = data_blocks.saturating_mul(block_size as u64);
     let total_size_gb = total_size_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
 
     Ok(format!(
@@ -917,6 +1105,27 @@ pub fn get_filesystem_info(device: &BlockDevice) -> Result<String> {
         inode_size,
         magic
     ))
+}
+
+/// Get filesystem size information (total_blocks, block_size)
+pub fn get_filesystem_size(device: &BlockDevice) -> Result<(u64, u32)> {
+    let data = device.read_sector(0)?;
+    
+    if data.len() < 16 {
+        anyhow::bail!("Insufficient data to read XFS superblock");
+    }
+    
+    let magic = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+    if magic != XFS_MAGIC {
+        anyhow::bail!("Not a valid XFS filesystem");
+    }
+    
+    let block_size = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
+    let data_blocks = u64::from_be_bytes([
+        data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]
+    ]);
+    
+    Ok((data_blocks, block_size))
 }
 
 /// Check if the provided data contains a valid XFS superblock

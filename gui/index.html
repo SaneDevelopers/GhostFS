@@ -9,394 +9,363 @@
 </head>
 <body>
     <div class="app-container">
-        <!-- Sidebar -->
-        <nav class="sidebar">
+        <!-- User Info Sidebar -->
+        <aside class="user-sidebar">
             <div class="sidebar-header">
                 <h1 class="app-title">GhostFS</h1>
             </div>
             
-            <div class="nav-menu">
-                <button class="nav-item active" data-section="recovery">
-                    <i class="fas fa-search"></i>
-                    <span>Recovery</span>
-                </button>
-                
-                <button class="nav-item" data-section="account">
+            <!-- User Profile -->
+            <div class="user-profile">
+                <div class="user-avatar">
                     <i class="fas fa-user"></i>
-                    <span>Account</span>
+                </div>
+                <div class="user-details">
+                    <h2 class="user-name" id="user-name">John Doe</h2>
+                    <p class="user-email" id="user-email">john.doe@example.com</p>
+                </div>
+            </div>
+
+            <!-- Plan Information -->
+            <div class="plan-info">
+                <h3 class="plan-title">Plan Details</h3>
+                <div class="plan-item">
+                    <span class="plan-label">Current Plan:</span>
+                    <span class="plan-value" id="plan-type">Professional</span>
+                </div>
+                <div class="plan-item">
+                    <span class="plan-label">Expiry Date:</span>
+                    <span class="plan-value" id="plan-expiry">Dec 31, 2025</span>
+                </div>
+                <div class="plan-item">
+                    <span class="plan-label">Recoveries Used:</span>
+                    <span class="plan-value" id="recoveries-used">12 / 50</span>
+                </div>
+                <div class="usage-progress">
+                    <div class="usage-bar">
+                        <div class="usage-fill" id="usage-fill" style="width: 24%"></div>
+                    </div>
+                    <span class="usage-text">24% used this month</span>
+                </div>
+            </div>
+
+            <!-- Quick Stats -->
+            <div class="quick-stats">
+                <h3 class="stats-title">Quick Stats</h3>
+                <div class="stat-item">
+                    <div class="stat-icon">
+                        <i class="fas fa-download"></i>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-number">247</span>
+                        <span class="stat-label">Total Recoveries</span>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-icon">
+                        <i class="fas fa-database"></i>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-number">15.2 GB</span>
+                        <span class="stat-label">Data Recovered</span>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-icon">
+                        <i class="fas fa-percentage"></i>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-number">89%</span>
+                        <span class="stat-label">Success Rate</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="sidebar-actions">
+                <button class="action-btn" id="account-settings">
+                    <i class="fas fa-user-cog"></i>
+                    <span>Account Settings</span>
                 </button>
-                
-                <button class="nav-item" data-section="history">
+                <button class="action-btn" id="view-history">
                     <i class="fas fa-history"></i>
-                    <span>History</span>
+                    <span>View History</span>
                 </button>
-                
-                <button class="nav-item" data-section="settings">
-                    <i class="fas fa-cog"></i>
-                    <span>Settings</span>
+                <button class="action-btn" id="upgrade-plan">
+                    <i class="fas fa-crown"></i>
+                    <span>Upgrade Plan</span>
                 </button>
             </div>
-        </nav>
+        </aside>
 
-        <!-- Main Content -->
+        <!-- Main Content Area -->
         <main class="main-content">
-            <!-- Recovery Section -->
-            <section id="recovery-section" class="content-section active">
-                <div class="content-grid">
-                    <!-- Device Selection Panel -->
-                    <div class="panel device-panel">
-                        <h2 class="panel-title">Select Device or Disk Image</h2>
-                        
-                        <div class="file-input-container">
-                            <input type="file" id="file-input" accept=".img,.iso,.dd,.raw" hidden>
-                            <button class="browse-btn" onclick="document.getElementById('file-input').click()">
-                                <i class="fas fa-folder-open"></i>
-                                Browse image file...
-                            </button>
-                            <div class="selected-file" id="selected-file"></div>
-                        </div>
+            <!-- Recovery Interface -->
+            <div class="recovery-interface">
+                <!-- Header -->
+                <header class="main-header">
+                    <h1 class="page-title">Data Recovery</h1>
+                    <p class="page-subtitle">Select a disk image to recover your lost data</p>
+                </header>
 
-                        <div class="filesystem-selection">
-                            <label for="fs-type">File System Type</label>
-                            <select id="fs-type" class="fs-dropdown">
-                                <option value="xfs">XFS</option>
-                                <option value="btrfs">Btrfs</option>
-                                <option value="exfat">exFAT</option>
-                            </select>
+                <!-- Disk Selection Panel -->
+                <section class="disk-selection">
+                    <div class="selection-header">
+                        <h2>Select Disk Image</h2>
+                        <div class="format-info">
+                            <i class="fas fa-info-circle"></i>
+                            Supports: .img, .iso, .dd, .raw formats
                         </div>
+                    </div>
 
-                        <div class="confidence-setting">
-                            <label for="confidence-slider">Confidence Threshold: <span id="confidence-value">50%</span></label>
-                            <input type="range" id="confidence-slider" min="0" max="100" value="50" class="slider">
+                    <div class="disk-input-area">
+                        <div class="file-drop-zone" id="file-drop-zone">
+                            <div class="drop-zone-content">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <h3>Drop your disk image here</h3>
+                                <p>or click to browse files</p>
+                                <input type="file" id="file-input" accept=".img,.iso,.dd,.raw" hidden>
+                                <button class="browse-btn" onclick="document.getElementById('file-input').click()">
+                                    <i class="fas fa-folder-open"></i>
+                                    Browse Files
+                                </button>
+                            </div>
+                            <div class="selected-file-info" id="selected-file-info" style="display: none;">
+                                <div class="file-details">
+                                    <i class="fas fa-hdd"></i>
+                                    <div class="file-info">
+                                        <span class="file-name" id="selected-file-name"></span>
+                                        <span class="file-size" id="selected-file-size"></span>
+                                    </div>
+                                    <button class="remove-file" id="remove-file">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
+                    </div>
 
-                        <button class="start-scan-btn" id="start-scan-btn">
-                            <i class="fas fa-play"></i>
-                            Start Scan
+                    <!-- Configuration Panel -->
+                    <div class="config-panel">
+                        <div class="config-row">
+                            <div class="config-item">
+                                <label for="fs-type">File System Type</label>
+                                <select id="fs-type" class="config-select">
+                                    <option value="auto">Auto Detect</option>
+                                    <option value="xfs">XFS</option>
+                                    <option value="btrfs">Btrfs</option>
+                                    <option value="exfat">exFAT</option>
+                                </select>
+                            </div>
+                            <div class="config-item">
+                                <label for="confidence-slider">Confidence Threshold: <span id="confidence-value">75%</span></label>
+                                <input type="range" id="confidence-slider" min="0" max="100" value="75" class="confidence-slider">
+                            </div>
+                        </div>
+                        <div class="config-row">
+                            <div class="config-item">
+                                <label for="output-dir">Output Directory</label>
+                                <div class="output-dir-input">
+                                    <input type="text" id="output-dir" value="./recovered_files" class="config-input">
+                                    <button class="browse-dir-btn">
+                                        <i class="fas fa-folder"></i>
+                                        Browse
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="action-buttons">
+                        <button class="start-recovery-btn" id="start-recovery-btn" disabled>
+                            <i class="fas fa-search"></i>
+                            Start Recovery Scan
+                        </button>
+                        <button class="advanced-options-btn" id="advanced-options-btn">
+                            <i class="fas fa-cog"></i>
+                            Advanced Options
                         </button>
                     </div>
+                </section>
 
-                    <!-- Scan Progress Panel -->
-                    <div class="panel progress-panel" id="progress-panel" style="display: none;">
-                        <h2 class="panel-title">Scan Progress</h2>
-                        
-                        <div class="progress-container">
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="progress-fill"></div>
-                            </div>
-                            <div class="progress-text" id="progress-text">Ready to scan...</div>
+                <!-- Recovery Progress Section -->
+                <section class="recovery-progress" id="recovery-progress" style="display: none;">
+                    <div class="progress-header">
+                        <h2>Recovery in Progress</h2>
+                        <button class="cancel-btn" id="cancel-recovery">
+                            <i class="fas fa-times"></i>
+                            Cancel
+                        </button>
+                    </div>
+                    
+                    <div class="progress-container">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill"></div>
                         </div>
-
-                        <div class="scan-details" id="scan-details">
-                            <div class="detail-item">
-                                <span class="detail-label">Status:</span>
-                                <span class="detail-value" id="scan-status">Idle</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Files Found:</span>
-                                <span class="detail-value" id="files-found">0</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Recoverable:</span>
-                                <span class="detail-value" id="recoverable-files">0</span>
-                            </div>
+                        <div class="progress-info">
+                            <span class="progress-text" id="progress-text">Initializing...</span>
+                            <span class="progress-percentage" id="progress-percentage">0%</span>
                         </div>
                     </div>
 
-                    <!-- Results Panel -->
-                    <div class="panel results-panel" id="results-panel">
-                        <h2 class="panel-title">Recovery Results</h2>
-                        
-                        <div class="results-summary">
-                            <div class="summary-item">
-                                <span class="summary-label">Confidence</span>
-                                <div class="confidence-bar">
-                                    <div class="confidence-fill" style="width: 85%"></div>
-                                </div>
-                                <span class="confidence-percent">85%</span>
+                    <div class="scan-stats">
+                        <div class="stat-box">
+                            <div class="stat-icon">
+                                <i class="fas fa-file"></i>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-number" id="files-found">0</span>
+                                <span class="stat-label">Files Found</span>
                             </div>
                         </div>
+                        <div class="stat-box">
+                            <div class="stat-icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-number" id="recoverable-files">0</span>
+                                <span class="stat-label">Recoverable</span>
+                            </div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-icon">
+                                <i class="fas fa-database"></i>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-number" id="data-size">0 MB</span>
+                                <span class="stat-label">Total Size</span>
+                            </div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-number" id="time-elapsed">00:00</span>
+                                <span class="stat-label">Time Elapsed</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
 
-                        <div class="file-type-filters">
-                            <h3>Size Range</h3>
+                <!-- Recovery Results Section -->
+                <section class="recovery-results" id="recovery-results" style="display: none;">
+                    <div class="results-header">
+                        <h2>Recovery Results</h2>
+                        <div class="results-summary">
+                            <span class="total-files" id="total-found">0 files found</span>
+                            <span class="avg-confidence">Average confidence: <span id="avg-confidence">0%</span></span>
+                        </div>
+                    </div>
+
+                    <!-- Filter Controls -->
+                    <div class="results-filters">
+                        <div class="filter-group">
+                            <label>File Types:</label>
                             <div class="filter-checkboxes">
                                 <label class="checkbox-item">
-                                    <input type="checkbox" checked>
+                                    <input type="checkbox" checked data-filter="images">
                                     <span class="checkmark"></span>
                                     Images
                                 </label>
                                 <label class="checkbox-item">
-                                    <input type="checkbox" checked>
+                                    <input type="checkbox" checked data-filter="documents">
                                     <span class="checkmark"></span>
                                     Documents
                                 </label>
                                 <label class="checkbox-item">
-                                    <input type="checkbox" checked>
+                                    <input type="checkbox" checked data-filter="videos">
                                     <span class="checkmark"></span>
                                     Videos
                                 </label>
                                 <label class="checkbox-item">
-                                    <input type="checkbox">
+                                    <input type="checkbox" checked data-filter="audio">
+                                    <span class="checkmark"></span>
+                                    Audio
+                                </label>
+                                <label class="checkbox-item">
+                                    <input type="checkbox" checked data-filter="archives">
                                     <span class="checkmark"></span>
                                     Archives
                                 </label>
                             </div>
                         </div>
-
-                        <div class="size-range">
-                            <div class="size-inputs">
-                                <input type="number" value="0" class="size-input">
-                                <span>KB</span>
+                        <div class="filter-group">
+                            <label>Size Range:</label>
+                            <div class="size-filter">
+                                <input type="number" id="min-size" value="0" min="0" class="size-input">
+                                <span class="size-unit">KB</span>
                                 <span class="range-separator">-</span>
-                                <input type="number" value="2" class="size-input">
-                                <span>MB</span>
+                                <input type="number" id="max-size" value="1000000" min="0" class="size-input">
+                                <span class="size-unit">KB</span>
+                            </div>
+                        </div>
+                        <div class="filter-group">
+                            <label>Min Confidence:</label>
+                            <input type="range" id="confidence-filter" min="0" max="100" value="50" class="filter-slider">
+                            <span id="confidence-filter-value">50%</span>
+                        </div>
+                    </div>
+
+                    <!-- Files Table -->
+                    <div class="files-table-container">
+                        <div class="table-header">
+                            <div class="table-actions">
+                                <label class="select-all-container">
+                                    <input type="checkbox" id="select-all-files">
+                                    <span class="checkmark"></span>
+                                    Select All
+                                </label>
+                                <span class="selected-count" id="selected-count">0 files selected</span>
+                            </div>
+                            <div class="view-options">
+                                <button class="view-btn active" data-view="table">
+                                    <i class="fas fa-table"></i>
+                                </button>
+                                <button class="view-btn" data-view="grid">
+                                    <i class="fas fa-th"></i>
+                                </button>
                             </div>
                         </div>
 
-                        <div class="files-table-container">
-                            <table class="files-table">
+                        <div class="files-table-wrapper">
+                            <table class="files-table" id="files-table">
                                 <thead>
                                     <tr>
-                                        <th><input type="checkbox" id="select-all"></th>
+                                        <th width="40"></th>
                                         <th>Filename</th>
+                                        <th>Type</th>
                                         <th>Size</th>
                                         <th>Confidence</th>
+                                        <th>Preview</th>
                                     </tr>
                                 </thead>
                                 <tbody id="files-table-body">
-                                    <!-- Sample data - will be populated dynamically -->
-                                    <tr>
-                                        <td><input type="checkbox" checked></td>
-                                        <td>photo1.jpg</td>
-                                        <td>1,108 KB</td>
-                                        <td><span class="confidence-badge high">100%</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td><input type="checkbox" checked></td>
-                                        <td>photo2.jpg</td>
-                                        <td>2,100 KB</td>
-                                        <td><span class="confidence-badge medium">66%</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td><input type="checkbox"></td>
-                                        <td>report.pdf</td>
-                                        <td>160 KB</td>
-                                        <td><span class="confidence-badge medium">57%</span></td>
-                                    </tr>
-                                    <tr>
-                                        <td><input type="checkbox"></td>
-                                        <td>video.mp4</td>
-                                        <td>158 MB</td>
-                                        <td><span class="confidence-badge low">33%</span></td>
-                                    </tr>
+                                    <!-- Dynamic content will be inserted here -->
                                 </tbody>
                             </table>
                         </div>
-
-                        <button class="recover-btn" id="recover-btn">
-                            <i class="fas fa-download"></i>
-                            Recover Selected
-                        </button>
                     </div>
-                </div>
-            </section>
 
-            <!-- Account Section -->
-            <section id="account-section" class="content-section">
-                <div class="account-container">
-                    <div class="panel account-panel">
-                        <h2 class="panel-title">Account Information</h2>
-                        
-                        <div class="account-info">
-                            <div class="avatar-section">
-                                <div class="avatar">
-                                    <i class="fas fa-user"></i>
-                                </div>
-                                <button class="change-avatar-btn">Change Avatar</button>
-                            </div>
-                            
-                            <div class="account-details">
-                                <div class="form-group">
-                                    <label>Username</label>
-                                    <input type="text" value="user@example.com" class="form-input">
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label>Full Name</label>
-                                    <input type="text" value="John Doe" class="form-input">
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label>License Type</label>
-                                    <select class="form-input">
-                                        <option>Professional</option>
-                                        <option>Enterprise</option>
-                                        <option>Personal</option>
-                                    </select>
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label>Recovery Sessions Used</label>
-                                    <div class="usage-bar">
-                                        <div class="usage-fill" style="width: 60%"></div>
-                                    </div>
-                                    <span class="usage-text">12 / 20 sessions this month</span>
-                                </div>
-                            </div>
+                    <!-- Recovery Actions -->
+                    <div class="recovery-actions">
+                        <div class="action-info">
+                            <span class="selected-files-info" id="selected-files-info">Select files to recover</span>
                         </div>
-                        
-                        <div class="account-actions">
-                            <button class="btn-primary">Save Changes</button>
-                            <button class="btn-secondary">Change Password</button>
+                        <div class="action-buttons-group">
+                            <button class="secondary-btn" id="preview-selected">
+                                <i class="fas fa-eye"></i>
+                                Preview Selected
+                            </button>
+                            <button class="primary-btn" id="recover-files" disabled>
+                                <i class="fas fa-download"></i>
+                                Recover Selected Files
+                            </button>
                         </div>
                     </div>
-                </div>
-            </section>
-
-            <!-- History Section -->
-            <section id="history-section" class="content-section">
-                <div class="history-container">
-                    <div class="panel history-panel">
-                        <h2 class="panel-title">Recovery History</h2>
-                        
-                        <div class="history-filters">
-                            <input type="search" placeholder="Search sessions..." class="search-input">
-                            <select class="filter-select">
-                                <option>All Sessions</option>
-                                <option>Successful</option>
-                                <option>Failed</option>
-                                <option>In Progress</option>
-                            </select>
-                        </div>
-                        
-                        <div class="history-list">
-                            <div class="history-item">
-                                <div class="history-icon">
-                                    <i class="fas fa-check-circle success"></i>
-                                </div>
-                                <div class="history-details">
-                                    <h4>XFS Recovery - USB Drive</h4>
-                                    <p>Recovered 15 files (2.3 GB) • 85% confidence</p>
-                                    <span class="history-date">2 hours ago</span>
-                                </div>
-                                <div class="history-actions">
-                                    <button class="btn-icon" title="View Details">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                    <button class="btn-icon" title="Download Report">
-                                        <i class="fas fa-download"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <div class="history-item">
-                                <div class="history-icon">
-                                    <i class="fas fa-exclamation-triangle warning"></i>
-                                </div>
-                                <div class="history-details">
-                                    <h4>Btrfs Recovery - External HDD</h4>
-                                    <p>Recovered 8 files (1.1 GB) • 45% confidence</p>
-                                    <span class="history-date">1 day ago</span>
-                                </div>
-                                <div class="history-actions">
-                                    <button class="btn-icon" title="View Details">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                    <button class="btn-icon" title="Download Report">
-                                        <i class="fas fa-download"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <div class="history-item">
-                                <div class="history-icon">
-                                    <i class="fas fa-times-circle error"></i>
-                                </div>
-                                <div class="history-details">
-                                    <h4>exFAT Recovery - SD Card</h4>
-                                    <p>Recovery failed • Corrupted filesystem</p>
-                                    <span class="history-date">3 days ago</span>
-                                </div>
-                                <div class="history-actions">
-                                    <button class="btn-icon" title="View Details">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                    <button class="btn-icon" title="Retry">
-                                        <i class="fas fa-redo"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Settings Section -->
-            <section id="settings-section" class="content-section">
-                <div class="settings-container">
-                    <div class="panel settings-panel">
-                        <h2 class="panel-title">Settings</h2>
-                        
-                        <div class="settings-groups">
-                            <div class="settings-group">
-                                <h3>Recovery Settings</h3>
-                                <div class="setting-item">
-                                    <label>Default Confidence Threshold</label>
-                                    <input type="range" min="0" max="100" value="50" class="slider">
-                                    <span>50%</span>
-                                </div>
-                                <div class="setting-item">
-                                    <label>Auto-save Recovery Sessions</label>
-                                    <input type="checkbox" checked class="toggle">
-                                </div>
-                                <div class="setting-item">
-                                    <label>Default Output Directory</label>
-                                    <input type="text" value="./recovered_files" class="form-input">
-                                    <button class="btn-secondary">Browse</button>
-                                </div>
-                            </div>
-                            
-                            <div class="settings-group">
-                                <h3>Interface</h3>
-                                <div class="setting-item">
-                                    <label>Theme</label>
-                                    <select class="form-input">
-                                        <option>Dark</option>
-                                        <option>Light</option>
-                                        <option>Auto</option>
-                                    </select>
-                                </div>
-                                <div class="setting-item">
-                                    <label>Show Advanced Options</label>
-                                    <input type="checkbox" class="toggle">
-                                </div>
-                            </div>
-                            
-                            <div class="settings-group">
-                                <h3>Logging</h3>
-                                <div class="setting-item">
-                                    <label>Log Level</label>
-                                    <select class="form-input">
-                                        <option>Info</option>
-                                        <option>Debug</option>
-                                        <option>Warning</option>
-                                        <option>Error</option>
-                                    </select>
-                                </div>
-                                <div class="setting-item">
-                                    <label>Enable Forensics Mode</label>
-                                    <input type="checkbox" class="toggle">
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="settings-actions">
-                            <button class="btn-primary">Save Settings</button>
-                            <button class="btn-secondary">Reset to Defaults</button>
-                        </div>
-                    </div>
-                </div>
-            </section>
+                </section>
+            </div>
         </main>
     </div>
 

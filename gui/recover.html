@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recovery Results - GhostFS</title>
+    <link rel="stylesheet" href="recover.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="recovery-container">
+        <!-- Header Section -->
+        <header class="recovery-header">
+            <div class="header-left">
+                <button class="back-btn" onclick="window.history.back()">
+                    <i class="fas fa-arrow-left"></i>
+                    Back to Scan
+                </button>
+                <div class="recovery-title">
+                    <h1>Recovery Results</h1>
+                    <p class="recovery-subtitle">Session completed on <span id="recovery-date">September 24, 2025</span></p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="action-btn export-btn">
+                    <i class="fas fa-file-export"></i>
+                    Export Report
+                </button>
+                <button class="action-btn save-session-btn">
+                    <i class="fas fa-save"></i>
+                    Save Session
+                </button>
+            </div>
+        </header>
+
+        <!-- Recovery Overview -->
+        <section class="recovery-overview">
+            <div class="overview-grid">
+                <div class="overview-card success-card">
+                    <div class="card-icon">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div class="card-content">
+                        <h3 id="recovered-count">47</h3>
+                        <p>Files Recovered</p>
+                        <span class="card-detail">Successfully restored</span>
+                    </div>
+                </div>
+                
+                <div class="overview-card data-card">
+                    <div class="card-icon">
+                        <i class="fas fa-database"></i>
+                    </div>
+                    <div class="card-content">
+                        <h3 id="total-size">2.8 GB</h3>
+                        <p>Total Data Size</p>
+                        <span class="card-detail">Across all files</span>
+                    </div>
+                </div>
+                
+                <div class="overview-card confidence-card">
+                    <div class="card-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <div class="card-content">
+                        <h3 id="avg-confidence">87%</h3>
+                        <p>Average Confidence</p>
+                        <span class="card-detail">Recovery reliability</span>
+                    </div>
+                </div>
+                
+                <div class="overview-card time-card">
+                    <div class="card-icon">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <div class="card-content">
+                        <h3 id="scan-time">4m 32s</h3>
+                        <p>Scan Duration</p>
+                        <span class="card-detail">Total processing time</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Content Grid -->
+        <div class="main-content-grid">
+            <!-- Left Column: Metadata and Analytics -->
+            <div class="left-column">
+                <!-- Disk Metadata -->
+                <section class="metadata-section">
+                    <div class="section-header">
+                        <h2>Disk Metadata</h2>
+                        <button class="expand-btn" data-target="metadata-content">
+                            <i class="fas fa-chevron-up"></i>
+                        </button>
+                    </div>
+                    <div class="section-content" id="metadata-content">
+                        <div class="metadata-grid">
+                            <div class="metadata-item">
+                                <span class="metadata-label">File System</span>
+                                <span class="metadata-value" id="filesystem-type">XFS</span>
+                            </div>
+                            <div class="metadata-item">
+                                <span class="metadata-label">Disk Size</span>
+                                <span class="metadata-value" id="disk-size">500 GB</span>
+                            </div>
+                            <div class="metadata-item">
+                                <span class="metadata-label">Block Size</span>
+                                <span class="metadata-value" id="block-size">4096 bytes</span>
+                            </div>
+                            <div class="metadata-item">
+                                <span class="metadata-label">Total Blocks</span>
+                                <span class="metadata-value" id="total-blocks">131,072,000</span>
+                            </div>
+                            <div class="metadata-item">
+                                <span class="metadata-label">Free Blocks</span>
+                                <span class="metadata-value" id="free-blocks">98,304,000</span>
+                            </div>
+                            <div class="metadata-item">
+                                <span class="metadata-label">Created</span>
+                                <span class="metadata-value" id="fs-created">March 15, 2024</span>
+                            </div>
+                            <div class="metadata-item">
+                                <span class="metadata-label">Last Mount</span>
+                                <span class="metadata-value" id="last-mount">September 20, 2025</span>
+                            </div>
+                            <div class="metadata-item">
+                                <span class="metadata-label">Mount Count</span>
+                                <span class="metadata-value" id="mount-count">1,247</span>
+                            </div>
+                        </div>
+
+                        <!-- Disk Health Indicator -->
+                        <div class="health-indicator">
+                            <h4>Disk Health Analysis</h4>
+                            <div class="health-bars">
+                                <div class="health-item">
+                                    <span class="health-label">Structural Integrity</span>
+                                    <div class="health-bar">
+                                        <div class="health-fill good" style="width: 92%;"></div>
+                                    </div>
+                                    <span class="health-value">92%</span>
+                                </div>
+                                <div class="health-item">
+                                    <span class="health-label">Data Accessibility</span>
+                                    <div class="health-bar">
+                                        <div class="health-fill warning" style="width: 78%;"></div>
+                                    </div>
+                                    <span class="health-value">78%</span>
+                                </div>
+                                <div class="health-item">
+                                    <span class="health-label">Recovery Potential</span>
+                                    <div class="health-bar">
+                                        <div class="health-fill good" style="width: 89%;"></div>
+                                    </div>
+                                    <span class="health-value">89%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Recovery Analytics -->
+                <section class="analytics-section">
+                    <div class="section-header">
+                        <h2>Recovery Analytics</h2>
+                        <button class="expand-btn" data-target="analytics-content">
+                            <i class="fas fa-chevron-up"></i>
+                        </button>
+                    </div>
+                    <div class="section-content" id="analytics-content">
+                        <!-- File Type Distribution Chart -->
+                        <div class="chart-container">
+                            <h4>File Type Distribution</h4>
+                            <canvas id="fileTypeChart" width="300" height="200"></canvas>
+                        </div>
+
+                        <!-- Confidence Distribution Chart -->
+                        <div class="chart-container">
+                            <h4>Recovery Confidence Distribution</h4>
+                            <canvas id="confidenceChart" width="300" height="200"></canvas>
+                        </div>
+
+                        <!-- Size Distribution -->
+                        <div class="size-distribution">
+                            <h4>File Size Distribution</h4>
+                            <div class="size-ranges">
+                                <div class="size-range-item">
+                                    <span class="size-label">< 1 MB</span>
+                                    <div class="size-bar">
+                                        <div class="size-fill" style="width: 65%;"></div>
+                                    </div>
+                                    <span class="size-count">31 files</span>
+                                </div>
+                                <div class="size-range-item">
+                                    <span class="size-label">1-10 MB</span>
+                                    <div class="size-bar">
+                                        <div class="size-fill" style="width: 40%;"></div>
+                                    </div>
+                                    <span class="size-count">12 files</span>
+                                </div>
+                                <div class="size-range-item">
+                                    <span class="size-label">10-100 MB</span>
+                                    <div class="size-bar">
+                                        <div class="size-fill" style="width: 15%;"></div>
+                                    </div>
+                                    <span class="size-count">3 files</span>
+                                </div>
+                                <div class="size-range-item">
+                                    <span class="size-label">> 100 MB</span>
+                                    <div class="size-bar">
+                                        <div class="size-fill" style="width: 5%;"></div>
+                                    </div>
+                                    <span class="size-count">1 file</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recovery Timeline -->
+                        <div class="recovery-timeline">
+                            <h4>Recovery Timeline</h4>
+                            <div class="timeline-items">
+                                <div class="timeline-item">
+                                    <div class="timeline-marker completed"></div>
+                                    <div class="timeline-content">
+                                        <span class="timeline-time">00:00</span>
+                                        <span class="timeline-event">Scan initiated</span>
+                                    </div>
+                                </div>
+                                <div class="timeline-item">
+                                    <div class="timeline-marker completed"></div>
+                                    <div class="timeline-content">
+                                        <span class="timeline-time">00:45</span>
+                                        <span class="timeline-event">Filesystem analysis complete</span>
+                                    </div>
+                                </div>
+                                <div class="timeline-item">
+                                    <div class="timeline-marker completed"></div>
+                                    <div class="timeline-content">
+                                        <span class="timeline-time">02:15</span>
+                                        <span class="timeline-event">Signature matching complete</span>
+                                    </div>
+                                </div>
+                                <div class="timeline-item">
+                                    <div class="timeline-marker completed"></div>
+                                    <div class="timeline-content">
+                                        <span class="timeline-time">04:32</span>
+                                        <span class="timeline-event">Recovery completed</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Right Column: Recovered Files -->
+            <div class="right-column">
+                <section class="files-section">
+                    <div class="section-header">
+                        <h2>Recovered Files</h2>
+                        <div class="files-actions">
+                            <button class="action-btn select-all-btn" id="select-all-files">
+                                <i class="fas fa-check-double"></i>
+                                Select All
+                            </button>
+                            <button class="action-btn download-selected-btn" id="download-selected" disabled>
+                                <i class="fas fa-download"></i>
+                                Download Selected
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- File Filters -->
+                    <div class="files-filters">
+                        <div class="filter-group">
+                            <label>Filter by type:</label>
+                            <div class="filter-tabs">
+                                <button class="filter-tab active" data-filter="all">All Files</button>
+                                <button class="filter-tab" data-filter="images">Images</button>
+                                <button class="filter-tab" data-filter="documents">Documents</button>
+                                <button class="filter-tab" data-filter="videos">Videos</button>
+                                <button class="filter-tab" data-filter="audio">Audio</button>
+                                <button class="filter-tab" data-filter="archives">Archives</button>
+                            </div>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label>Confidence:</label>
+                            <select id="confidence-filter" class="filter-select">
+                                <option value="0">All Confidence Levels</option>
+                                <option value="80">High (80%+)</option>
+                                <option value="60">Medium (60%+)</option>
+                                <option value="40">Low (40%+)</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group">
+                            <label>Sort by:</label>
+                            <select id="sort-files" class="filter-select">
+                                <option value="name">File Name</option>
+                                <option value="size">File Size</option>
+                                <option value="confidence">Confidence</option>
+                                <option value="type">File Type</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Files List -->
+                    <div class="files-list" id="files-list">
+                        <!-- Files will be populated dynamically -->
+                    </div>
+
+                    <!-- Files Pagination -->
+                    <div class="files-pagination">
+                        <button class="page-btn" id="prev-page" disabled>
+                            <i class="fas fa-chevron-left"></i>
+                            Previous
+                        </button>
+                        <div class="page-info">
+                            <span id="page-current">1</span> of <span id="page-total">3</span>
+                        </div>
+                        <button class="page-btn" id="next-page">
+                            Next
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- File Preview Modal -->
+        <div class="modal-overlay" id="preview-modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="preview-title">File Preview</h3>
+                    <button class="modal-close" onclick="closePreview()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="preview-content" id="preview-content">
+                        <!-- Preview content will be loaded here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="action-btn" onclick="downloadSingleFile()">
+                        <i class="fas fa-download"></i>
+                        Download File
+                    </button>
+                    <button class="action-btn secondary" onclick="closePreview()">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Progress Modal for Downloads -->
+        <div class="modal-overlay" id="download-modal" style="display: none;">
+            <div class="modal-content progress-modal">
+                <div class="modal-header">
+                    <h3>Downloading Files</h3>
+                </div>
+                <div class="modal-body">
+                    <div class="download-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="download-progress-fill"></div>
+                        </div>
+                        <div class="progress-info">
+                            <span id="download-status">Preparing download...</span>
+                            <span id="download-percentage">0%</span>
+                        </div>
+                    </div>
+                    <div class="download-details">
+                        <p>Files: <span id="download-file-count">0</span></p>
+                        <p>Size: <span id="download-size">0 MB</span></p>
+                        <p>Speed: <span id="download-speed">0 MB/s</span></p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="action-btn secondary" onclick="cancelDownload()">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="recover.js"></script>
+</body>
+</html>

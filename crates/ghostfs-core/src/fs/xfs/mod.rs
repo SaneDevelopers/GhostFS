@@ -622,12 +622,12 @@ impl XfsRecoveryEngine {
         }
 
         // CHECK 8: UID/GID sanity check
-        // UIDs/GIDs should be reasonable (< 65535 for most systems)
-        // 0xFFFFFFFF often means uninitialized/corrupted
-        const MAX_REASONABLE_UID: u32 = 65535;
-        if uid == 0xFFFFFFFF || gid == 0xFFFFFFFF || uid > MAX_REASONABLE_UID {
-            return false; // Suspicious ownership
+        // 0xFFFFFFFF often means uninitialized/corrupted ownership fields
+        if uid == 0xFFFFFFFF || gid == 0xFFFFFFFF {
+            return false; // Suspicious ownership (likely uninitialized)
         }
+
+        // CHECK 9: Format consistency with file type
 
         // CHECK 9: Format consistency with file type
         // Directories shouldn't use local format for large sizes

@@ -384,22 +384,29 @@ impl<'a> BtrfsRecoveryEngine<'a> {
             let offset = block_num * block_size;
             
             if let Ok(data) = self.device.read_bytes(offset, block_size as usize) {
-                if let Some((mime, ext)) = self.detect_file_signature(&data) {
+                if let Some((mime, ext, file_size)) = self.detect_file_with_size(&data, offset) {
+                    // Calculate block count from file size
+                    let block_count = if file_size > 0 {
+                        (file_size + block_size - 1) / block_size
+                    } else {
+                        1
+                    };
+                    
                     let file = DeletedFile {
                         id: *file_id_counter,
                         inode_or_cluster: block_num,
                         original_path: Some(PathBuf::from(format!("recovered_{}_{}.{}", 
                             block_num, file_id_counter, ext))),
-                        size: 0, // Unknown
+                        size: file_size,
                         deletion_time: None,
-                        confidence_score: 0.4, // Lower confidence for signature scan
+                        confidence_score: 0.5, // Slightly higher now that we have size
                         file_type: FileType::RegularFile,
                         data_blocks: vec![BlockRange {
                             start_block: block_num,
-                            block_count: 1,
+                            block_count,
                             is_allocated: false,
                         }],
-                        is_recoverable: true,
+                        is_recoverable: file_size > 0,
                         metadata: FileMetadata {
                             mime_type: Some(mime),
                             file_extension: Some(ext),
@@ -485,33 +492,116 @@ impl<'a> BtrfsRecoveryEngine<'a> {
         }
     }
     
-    /// Detect file type from magic bytes
-    fn detect_file_signature(&self, data: &[u8]) -> Option<(String, String)> {
-        if data.len() < 8 {
+    /// Detect file type and estimate size by scanning for end markers
+    fn detect_file_with_size(&self, header: &[u8], start_offset: u64) -> Option<(String, String, u64)> {
+        if header.len() < 8 {
             return None;
         }
         
-        // JPEG
-        if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
-            return Some(("image/jpeg".to_string(), "jpg".to_string()));
+        // JPEG: starts with FF D8 FF, ends with FF D9
+        if header.starts_with(&[0xFF, 0xD8, 0xFF]) {
+            let size = self.find_jpeg_end(start_offset);
+            return Some(("image/jpeg".to_string(), "jpg".to_string(), size));
         }
         
-        // PNG
-        if data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
-            return Some(("image/png".to_string(), "png".to_string()));
+        // PNG: starts with 89 50 4E 47 0D 0A 1A 0A, ends with IEND chunk
+        if header.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+            let size = self.find_png_end(start_offset);
+            return Some(("image/png".to_string(), "png".to_string(), size));
         }
         
-        // PDF
-        if data.starts_with(b"%PDF") {
-            return Some(("application/pdf".to_string(), "pdf".to_string()));
+        // PDF: starts with %PDF, ends with %%EOF
+        if header.starts_with(b"%PDF") {
+            let size = self.find_pdf_end(start_offset);
+            return Some(("application/pdf".to_string(), "pdf".to_string(), size));
         }
         
-        // ZIP/DOCX/etc
-        if data.starts_with(&[0x50, 0x4B, 0x03, 0x04]) {
-            return Some(("application/zip".to_string(), "zip".to_string()));
+        // ZIP: has a more complex structure, use conservative estimate
+        if header.starts_with(&[0x50, 0x4B, 0x03, 0x04]) {
+            // For ZIP files, read a reasonable chunk (1MB max)
+            let size = std::cmp::min(self.superblock.total_bytes - start_offset, 1024 * 1024);
+            return Some(("application/zip".to_string(), "zip".to_string(), size));
         }
         
         None
+    }
+    
+    /// Find JPEG end marker (FF D9)
+    fn find_jpeg_end(&self, start_offset: u64) -> u64 {
+        let max_size = std::cmp::min(
+            self.superblock.total_bytes - start_offset,
+            10 * 1024 * 1024  // Max 10MB for JPEG
+        );
+        
+        // Read in chunks to find end marker
+        let chunk_size = 64 * 1024; // 64KB chunks
+        let mut offset = start_offset;
+        
+        while offset < start_offset + max_size {
+            let read_size = std::cmp::min(chunk_size, (start_offset + max_size - offset) as usize);
+            if let Ok(data) = self.device.read_bytes(offset, read_size) {
+                // Look for JPEG end marker FF D9
+                for i in 0..data.len().saturating_sub(1) {
+                    if data[i] == 0xFF && data[i + 1] == 0xD9 {
+                        return offset - start_offset + i as u64 + 2;
+                    }
+                }
+            }
+            offset += chunk_size as u64 - 1; // Overlap by 1 byte
+        }
+        
+        // If we can't find end marker, return a reasonable estimate
+        max_size
+    }
+    
+    /// Find PNG end (IEND chunk)
+    fn find_png_end(&self, start_offset: u64) -> u64 {
+        let max_size = std::cmp::min(
+            self.superblock.total_bytes - start_offset,
+            10 * 1024 * 1024  // Max 10MB for PNG
+        );
+        
+        // Read in chunks to find IEND marker
+        let chunk_size = 64 * 1024;
+        let mut offset = start_offset;
+        
+        while offset < start_offset + max_size {
+            let read_size = std::cmp::min(chunk_size, (start_offset + max_size - offset) as usize);
+            if let Ok(data) = self.device.read_bytes(offset, read_size) {
+                // Look for IEND + CRC (total 12 bytes: length + IEND + CRC)
+                if let Some(pos) = data.windows(4).position(|w| w == b"IEND") {
+                    // IEND chunk is: 4 bytes length (0) + IEND + 4 bytes CRC
+                    return offset - start_offset + pos as u64 + 8;
+                }
+            }
+            offset += chunk_size as u64 - 4; // Overlap by 4 bytes
+        }
+        
+        max_size
+    }
+    
+    /// Find PDF end (%%EOF marker)
+    fn find_pdf_end(&self, start_offset: u64) -> u64 {
+        let max_size = std::cmp::min(
+            self.superblock.total_bytes - start_offset,
+            50 * 1024 * 1024  // Max 50MB for PDF
+        );
+        
+        // Read in chunks to find %%EOF
+        let chunk_size = 64 * 1024;
+        let mut offset = start_offset;
+        
+        while offset < start_offset + max_size {
+            let read_size = std::cmp::min(chunk_size, (start_offset + max_size - offset) as usize);
+            if let Ok(data) = self.device.read_bytes(offset, read_size) {
+                if let Some(pos) = data.windows(5).position(|w| w == b"%%EOF") {
+                    return offset - start_offset + pos as u64 + 5;
+                }
+            }
+            offset += chunk_size as u64 - 5;
+        }
+        
+        max_size
     }
 }
 

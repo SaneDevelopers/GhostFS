@@ -145,16 +145,16 @@ mod tests {
 
     #[test]
     fn test_magic_detection() {
-        // JPEG
-        let jpeg_header = [0xFF, 0xD8, 0xFF, 0xE0];
+        // JPEG (needs 8 bytes minimum)
+        let jpeg_header = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46];
         assert_eq!(MagicDetector::detect_file_type(&jpeg_header), Some("image/jpeg"));
 
         // PNG
         let png_header = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         assert_eq!(MagicDetector::detect_file_type(&png_header), Some("image/png"));
 
-        // PDF
-        let pdf_header = [0x25, 0x50, 0x44, 0x46];
+        // PDF (needs 8 bytes minimum)
+        let pdf_header = [0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34];
         assert_eq!(MagicDetector::detect_file_type(&pdf_header), Some("application/pdf"));
     }
 

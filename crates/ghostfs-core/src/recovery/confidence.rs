@@ -384,7 +384,7 @@ mod tests {
             device_activity_level: ActivityLevel::Low,
         };
 
-        let mut metadata = FileMetadata {
+        let metadata = FileMetadata {
             mime_type: Some("image/jpeg".to_string()),
             file_extension: Some("jpg".to_string()),
             permissions: Some(0o644),

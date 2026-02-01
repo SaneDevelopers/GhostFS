@@ -98,12 +98,12 @@ enum Commands {
 		/// Filesystem type
 		#[arg(long, value_parser = ["xfs", "btrfs", "exfat"], default_value = "xfs")]
 		fs: String,
-		/// Minimum confidence score (0.0-1.0)
-		#[arg(long, default_value = "0.5")]
-		confidence: f32,
 		/// Show detailed filesystem information
 		#[arg(long)]
 		info: bool,
+		/// Disable interactive prompts (for CI/automation)
+		#[arg(long)]
+		no_interactive: bool,
 	},
 	/// Detect filesystem type
 	Detect {
@@ -117,15 +117,15 @@ enum Commands {
 		/// Filesystem type
 		#[arg(long, value_parser = ["xfs", "btrfs", "exfat"], default_value = "xfs")]
 		fs: String,
-		/// Minimum confidence score (0.0-1.0)
-		#[arg(long, default_value = "0.5")]
-		confidence: f32,
 		/// Output directory for recovered files
 		#[arg(long)]
 		out: PathBuf,
 		/// File IDs to recover (if not specified, recovers all recoverable files)
 		#[arg(long)]
 		ids: Option<Vec<String>>,
+		/// Disable interactive prompts (for CI/automation)
+		#[arg(long)]
+		no_interactive: bool,
 	},
 	/// Show a timeline (stub for now)
 	Timeline,
@@ -167,7 +167,7 @@ fn main() -> Result<()> {
 
 	let cli = Cli::parse();
 	match cli.command {
-		Commands::Scan { image, fs, confidence, info } => {
+		Commands::Scan { image, fs, info, no_interactive } => {
 			let fs_type = match fs.as_str() {
 				"xfs" => FileSystemType::Xfs,
 				"btrfs" => FileSystemType::Btrfs,
@@ -190,23 +190,49 @@ fn main() -> Result<()> {
 				}
 			}
 
-			// Get XFS config with interactive prompt if needed
+			// Get XFS config - only prompt interactively if stdin is a TTY and not --no-interactive
+			let interactive = !no_interactive && atty::is(atty::Stream::Stdin);
 			let xfs_config = if fs_type == FileSystemType::Xfs {
-				get_xfs_config_for_scan(&image, true)?
+				get_xfs_config_for_scan(&image, interactive)?
 			} else {
 				None
 			};
 
-			// Perform scan
-			let session = ghostfs_core::scan_and_analyze_with_config(&image, fs_type, confidence, xfs_config)?;
+			// Perform scan (no threshold - software auto-calculates confidence)
+			let session = ghostfs_core::scan_and_analyze_with_config(&image, fs_type, xfs_config)?;
 			
 			println!("✅ Scan completed successfully!");
 			println!("📊 Session ID: {}", session.id);
 			println!("📁 File System: {}", session.fs_type);
 			println!("💾 Device Size: {} MB", session.metadata.device_size / (1024 * 1024));
-			println!("🎯 Confidence Threshold: {:.1}%", confidence * 100.0);
 			println!("📈 Files Found: {}", session.metadata.files_found);
-			println!("🔄 Recoverable Files: {}", session.metadata.recoverable_files);
+			println!("🔄 Recoverable Files: {} (confidence >= 40%)", session.metadata.recoverable_files);
+			
+			// Show detailed file list with auto-calculated confidence
+			if !session.scan_results.is_empty() {
+				println!("\n📋 Found Files:");
+				println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+				for file in &session.scan_results {
+					let path_str = file.original_path
+						.as_ref()
+						.map(|p| p.display().to_string())
+						.unwrap_or_else(|| format!("inode_{}", file.inode_or_cluster));
+					
+					let recommendation = if file.confidence_score >= 0.8 {
+						"✅ High - Excellent recovery prospects"
+					} else if file.confidence_score >= 0.6 {
+						"🟡 Medium - Good recovery prospects"
+					} else if file.confidence_score >= 0.4 {
+						"🟠 Low - Fair recovery prospects"
+					} else {
+						"❌ Poor - Not recommended"
+					};
+					
+					println!("\n  ID: {} | {}", file.id, path_str);
+					println!("     Size: {} bytes | Confidence: {:.1}%", file.size, file.confidence_score * 100.0);
+					println!("     {}", recommendation);
+				}
+			}
 		}
 		Commands::Detect { image } => {
 			println!("🔍 Detecting file system type for: {}", image.display());
@@ -226,7 +252,7 @@ fn main() -> Result<()> {
 				}
 			}
 		}
-		Commands::Recover { image, fs, confidence, out, ids } => {
+		Commands::Recover { image, fs, out, ids, no_interactive } => {
 			println!("🔄 Starting recovery process for: {}", image.display());
 			println!("📁 Output directory: {}", out.display());
 			
@@ -241,28 +267,23 @@ fn main() -> Result<()> {
 				}
 			};
 
-			// Validate confidence range
-			if confidence < 0.0 || confidence > 1.0 {
-				eprintln!("❌ Confidence must be between 0.0 and 1.0");
-				std::process::exit(1);
-			}
-
 			// Create output directory if it doesn't exist
 			std::fs::create_dir_all(&out)?;
 
-			// Get XFS config with interactive prompt if needed
+			// Get XFS config - only prompt interactively if stdin is a TTY and not --no-interactive
+			let interactive = !no_interactive && atty::is(atty::Stream::Stdin);
 			let xfs_config = if fs_type == ghostfs_core::FileSystemType::Xfs {
-				get_xfs_config_for_scan(&image, true)?
+				get_xfs_config_for_scan(&image, interactive)?
 			} else {
 				None
 			};
 
-			// First perform scan to identify recoverable files
+			// First perform scan to identify recoverable files (auto-confidence)
 			println!("🔍 Scanning for recoverable files...");
-			let session = ghostfs_core::scan_and_analyze_with_config(&image, fs_type, confidence, xfs_config)?;
+			let session = ghostfs_core::scan_and_analyze_with_config(&image, fs_type, xfs_config)?;
 			
 			if session.metadata.recoverable_files == 0 {
-				println!("❌ No recoverable files found with confidence >= {:.1}%", confidence * 100.0);
+				println!("❌ No recoverable files found (confidence >= 40%)");
 				return Ok(());
 			}
 

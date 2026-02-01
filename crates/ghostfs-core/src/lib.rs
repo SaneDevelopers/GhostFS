@@ -155,27 +155,30 @@ pub fn scan_image(image_path: &Path, fs: FileSystemType) -> Result<RecoverySessi
 }
 
 /// Scan and analyze using the advanced recovery engine
-pub fn scan_and_analyze(image_path: &Path, fs: FileSystemType, confidence_threshold: f32) -> Result<RecoverySession> {
-    scan_and_analyze_with_config(image_path, fs, confidence_threshold, None)
+pub fn scan_and_analyze(image_path: &Path, fs: FileSystemType) -> Result<RecoverySession> {
+    scan_and_analyze_with_config(image_path, fs, None)
 }
 
 /// Scan and analyze with custom XFS configuration
 pub fn scan_and_analyze_with_config(
     image_path: &Path, 
     fs: FileSystemType, 
-    confidence_threshold: f32,
     xfs_config: Option<fs::xfs::XfsRecoveryConfig>
 ) -> Result<RecoverySession> {
     use recovery::{RecoveryEngine, RecoveryConfig, ScanDepth, RecoveryStrategy};
     use memmap2::MmapOptions;
     use std::fs::File;
     
+    // Software auto-determines recoverability based on confidence scoring
+    // Files with >= 40% confidence are marked as recoverable
+    const AUTO_CONFIDENCE_THRESHOLD: f32 = 0.4;
+    
     let file = File::open(image_path)?;
     let mmap = unsafe { MmapOptions::new().map(&file)? };
     
     // Create recovery configuration
     let config = RecoveryConfig {
-        min_confidence_threshold: confidence_threshold,
+        min_confidence_threshold: AUTO_CONFIDENCE_THRESHOLD,
         scan_depth: ScanDepth::Standard,
         recovery_strategies: vec![
             RecoveryStrategy::DirectoryTableScan,
@@ -217,7 +220,7 @@ pub fn scan_and_analyze_with_config(
         created_at: Utc::now(),
         scan_results: recovery_result.files,
         total_scanned: recovery_result.total_files_found as u64,
-        confidence_threshold,
+        confidence_threshold: AUTO_CONFIDENCE_THRESHOLD,
         metadata: SessionMetadata {
             device_size: std::fs::metadata(image_path)?.len(),
             filesystem_size: std::fs::metadata(image_path)?.len(),
@@ -229,10 +232,10 @@ pub fn scan_and_analyze_with_config(
     };
     
     tracing::info!(
-        "Recovery complete: {} files found, {} recoverable (threshold: {})",
+        "Recovery complete: {} files found, {} recoverable (auto-threshold: {})",
         recovery_result.total_files_found,
         recovery_result.recoverable_files,
-        confidence_threshold
+        AUTO_CONFIDENCE_THRESHOLD
     );
     
     Ok(session)

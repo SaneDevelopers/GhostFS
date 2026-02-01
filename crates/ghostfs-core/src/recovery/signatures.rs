@@ -528,7 +528,7 @@ mod tests {
     #[test]
     fn test_entropy_calculation() {
         // Uniform distribution should have high entropy
-        let uniform = (0..256u8).collect::<Vec<_>>();
+        let uniform = (0..=255u8).collect::<Vec<_>>();
         let entropy = calculate_entropy(&uniform);
         assert!(entropy > 7.5); // Close to 8.0 for uniform distribution
         

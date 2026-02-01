@@ -883,6 +883,12 @@ impl XfsRecoveryEngine {
             
             // Check if it's plain text
             let sample_size = std::cmp::min(data.len(), self.config.text_sample_size);
+            
+            // Avoid division by zero if sample_size is 0
+            if sample_size == 0 {
+                return (None, None);
+            }
+            
             let text_chars = data.iter().take(sample_size).filter(|&&b| {
                 (b >= 32 && b <= 126) || b == b'\n' || b == b'\r' || b == b'\t'
             }).count();

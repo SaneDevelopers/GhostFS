@@ -473,7 +473,7 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 - **Wiki**: Additional documentation and guides
 
 ### Professional Support
-- **Email**: support@ghostfs.com
+- **Email**: sanedevlopers2025@gmail.com
 - **Enterprise**: Custom development and integration
 - **Training**: Forensics workshops and certification
 

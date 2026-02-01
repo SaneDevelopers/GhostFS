@@ -424,9 +424,16 @@ impl XfsRecoveryEngine {
 
         // Parse inode core structure
         let mode = u16::from_be_bytes([inode_data[2], inode_data[3]]);
-        let _version = inode_data[4];
+        let version = inode_data[4];
         let format = inode_data[5];
         let onlink = u16::from_be_bytes([inode_data[6], inode_data[7]]);
+        
+        // Generation number (helps detect reused inodes)
+        let gen = u32::from_be_bytes([inode_data[8], inode_data[9], inode_data[10], inode_data[11]]);
+        
+        // UID/GID for ownership info
+        let uid = u32::from_be_bytes([inode_data[24], inode_data[25], inode_data[26], inode_data[27]]);
+        let gid = u32::from_be_bytes([inode_data[28], inode_data[29], inode_data[30], inode_data[31]]);
         
         // File size (64-bit)
         let size = u64::from_be_bytes([
@@ -446,7 +453,10 @@ impl XfsRecoveryEngine {
         let ctime = i32::from_be_bytes([inode_data[88], inode_data[89], inode_data[90], inode_data[91]]);
 
         // Enhanced deleted file detection with multiple heuristics
-        let is_deleted = self.is_likely_deleted_file(mode, onlink, size, nblocks, atime, mtime, ctime);
+        let is_deleted = self.is_likely_deleted_file(
+            mode, onlink, size, nblocks, atime, mtime, ctime, 
+            version, format, gen, uid, gid
+        );
         
         if !is_deleted {
             return Ok(None);
@@ -514,8 +524,8 @@ impl XfsRecoveryEngine {
                 mime_type,
                 file_extension: extension,
                 permissions: Some(mode as u32 & 0o777),
-                owner_uid: None, // Could be extracted from inode if needed
-                owner_gid: None,
+                owner_uid: Some(uid),
+                owner_gid: Some(gid),
                 created_time: deletion_time, // Use ctime as creation time
                 modified_time,
                 accessed_time,
@@ -536,7 +546,12 @@ impl XfsRecoveryEngine {
         nblocks: u64,
         _atime: i32,
         mtime: i32,
-        ctime: i32
+        ctime: i32,
+        version: u8,
+        format: u8,
+        gen: u32,
+        uid: u32,
+        gid: u32,
     ) -> bool {
         // PRIMARY INDICATOR: Link count is 0 (no directory entries point to this inode)
         if onlink != 0 {
@@ -587,7 +602,39 @@ impl XfsRecoveryEngine {
             return false; // Unreasonably large, likely corrupted
         }
 
-        // CHECK 5: Timestamp freshness (optional heuristic)
+        // CHECK 5: XFS version validation
+        // XFS inode versions: 1 (old), 2 (v4), 3 (v5 with CRC)
+        if version == 0 || version > 3 {
+            return false; // Invalid inode version
+        }
+
+        // CHECK 6: Format field validation
+        // Format must be valid for XFS: extents (1), btree (2), or local (3)
+        if format == 0 || format > 3 {
+            return false; // Invalid data fork format
+        }
+
+        // CHECK 7: Generation number check
+        // Generation 0 is suspicious (newly created inode or corrupted)
+        // Very high generation numbers might indicate corruption
+        if gen == 0 || gen > 1_000_000 {
+            return false; // Suspicious generation number
+        }
+
+        // CHECK 8: UID/GID sanity check
+        // UIDs/GIDs should be reasonable (< 65535 for most systems)
+        // 0xFFFFFFFF often means uninitialized/corrupted
+        const MAX_REASONABLE_UID: u32 = 65535;
+        if uid == 0xFFFFFFFF || gid == 0xFFFFFFFF || uid > MAX_REASONABLE_UID {
+            return false; // Suspicious ownership
+        }
+
+        // CHECK 9: Format consistency with file type
+        // Directories shouldn't use local format for large sizes
+        if file_type == 0x4000 && format == XFS_DINODE_FMT_LOCAL && size > 256 {
+            return false; // Directory too large for local format
+        }
+// CHECK 5: Timestamp freshness (optional heuristic)
         // Files deleted very long ago might have been partially overwritten
         // But we still want to find them, so this is just for confidence scoring
         

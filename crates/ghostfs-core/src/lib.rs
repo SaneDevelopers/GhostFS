@@ -339,10 +339,12 @@ fn recover_single_file(
     let mut bytes_written = 0u64;
     
     // Determine block size based on filesystem type
+    // Note: For exFAT, we use byte offsets directly (block_size = 1)
+    // For other filesystems, we use actual block sizes
     let block_size = match fs_type {
         FileSystemType::Xfs => 4096,
         FileSystemType::Btrfs => 4096,
-        FileSystemType::ExFat => 512,
+        FileSystemType::ExFat => 1,  // exFAT uses byte offsets directly
     };
     
     // Recover data from each block range

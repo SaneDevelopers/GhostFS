@@ -315,15 +315,34 @@ impl RecoveryEngine {
     }
 
     fn analyze_exfat_filesystem(&mut self) -> Result<FileSystemContext, RecoveryError> {
-        // exFAT-specific analysis
-        let boot_sector = self.parse_exfat_boot_sector()?;
+        tracing::info!("RecoveryEngine: Starting exFAT filesystem analysis");
         
+        // Try to use the exFAT recovery engine
+        match self.create_block_device() {
+            Ok(device) => {
+                // Use the exFAT module to scan for deleted files
+                match crate::fs::exfat::scan_for_deleted_files(&device) {
+                    Ok(mut files) => {
+                        tracing::info!("exFAT engine returned {} files", files.len());
+                        self.recovered_files.append(&mut files);
+                    }
+                    Err(e) => {
+                        tracing::warn!("exFAT scan failed: {:?}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to create block device for exFAT: {:?}", e);
+            }
+        }
+        
+        // Return filesystem context
         Ok(FileSystemContext {
             fs_type: FileSystemType::ExFat,
             filesystem_health: 0.75, // exFAT has less integrity checking
-            block_size: boot_sector.bytes_per_sector as usize * boot_sector.sectors_per_cluster as usize,
-            total_blocks: boot_sector.total_sectors as u64,
-            free_blocks: 0, // TODO: Scan FAT for free clusters
+            block_size: 4096,
+            total_blocks: self.device_map.len() as u64 / 4096,
+            free_blocks: 0,
             inode_count: 0, // exFAT doesn't use inodes
             allocation_groups: None,
             journal_location: None,
@@ -494,12 +513,6 @@ impl RecoveryEngine {
         }
     }
 
-    // Placeholder implementations for file system specific operations
-    fn parse_exfat_boot_sector(&self) -> Result<ExFatBootSector, RecoveryError> {
-        // TODO: Implement exFAT boot sector parsing
-        Err(RecoveryError::NotImplemented("exFAT boot sector parsing".to_string()))
-    }
-
     fn scan_xfs_directories(&mut self) -> Result<(), RecoveryError> {
         // TODO: Implement XFS directory scanning
         Ok(())
@@ -627,19 +640,6 @@ struct FileSystemContext {
     #[allow(dead_code)]
     last_mount_time: Option<DateTime<Utc>>,
     activity_level: ActivityLevel,
-}
-
-#[derive(Debug)]
-struct ExFatBootSector {
-    bytes_per_sector: u16,
-    sectors_per_cluster: u8,
-    total_sectors: u64,
-    #[allow(dead_code)]
-    fat_offset: u32,
-    #[allow(dead_code)]
-    fat_length: u32,
-    #[allow(dead_code)]
-    cluster_heap_offset: u32,
 }
 
 #[derive(Debug)]

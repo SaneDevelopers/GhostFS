@@ -6,6 +6,11 @@ use std::io::Cursor;
 
 use super::common::BlockDevice;
 
+// Sub-modules
+pub mod fat;
+pub mod directory;
+pub mod recovery;
+
 /// exFAT file system signature
 const EXFAT_SIGNATURE: &[u8; 8] = b"EXFAT   ";
 
@@ -172,27 +177,25 @@ pub fn decode_utf16_filename(utf16_data: &[u8]) -> Result<String> {
     Ok(decoded.into_owned())
 }
 
-/// Scan for deleted files in exFAT (placeholder implementation)  
+/// Scan for deleted files in exFAT
 pub fn scan_for_deleted_files(device: &BlockDevice) -> Result<Vec<crate::DeletedFile>> {
-    let _boot_sector = {
-        let sector0 = device.read_sector(0)?;
-        ExFatBootSector::parse(sector0)?
-    };
+    // Parse boot sector
+    let sector0 = device.read_sector(0)?;
+    let boot_sector = ExFatBootSector::parse(sector0)?;
     
-    tracing::info!("exFAT scan: Starting FAT and directory analysis...");
+    tracing::info!("exFAT scan: Starting recovery analysis");
+    tracing::info!("  Volume size: {} MB", 
+        (boot_sector.volume_length * boot_sector.bytes_per_sector() as u64) / (1024 * 1024));
+    tracing::info!("  Cluster size: {} bytes", boot_sector.bytes_per_cluster());
+    tracing::info!("  Root directory cluster: {}", boot_sector.first_cluster_of_root_directory);
     
-    // TODO: Implement actual exFAT scanning:
-    // 1. Parse File Allocation Table (FAT)
-    // 2. Scan allocation bitmap for free clusters
-    // 3. Search unallocated clusters for directory entries
-    // 4. Reconstruct cluster chains for fragmented files
-    // 5. Decode UTF-16 long filenames
-    // 6. Handle large files (>4GB)
+    // Create and use the recovery engine
+    let recovery_engine = recovery::ExFatRecoveryEngine::new(device, boot_sector)?;
+    let deleted_files = recovery_engine.scan_deleted_files()?;
     
-    tracing::info!("exFAT scan: Analysis complete (placeholder)");
+    tracing::info!("exFAT scan complete: {} files found", deleted_files.len());
     
-    // Return empty results for now
-    Ok(Vec::new())
+    Ok(deleted_files)
 }
 
 #[cfg(test)]

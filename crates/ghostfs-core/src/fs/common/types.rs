@@ -63,6 +63,29 @@ impl BlockDevice {
         let offset = block_number * block_size as u64;
         self.read_bytes(offset, block_size as usize)
     }
+    
+    /// Create a test BlockDevice from in-memory data (for testing only)
+    #[cfg(test)]
+    pub fn from_vec(data: Vec<u8>) -> Self {
+        use std::io::Write;
+        let temp_file = tempfile::NamedTempFile::new().expect("Failed to create temp file");
+        let mut file = temp_file.as_file();
+        file.write_all(&data).expect("Failed to write test data");
+        file.sync_all().expect("Failed to sync");
+        
+        let size = data.len() as u64;
+        let mmap = unsafe {
+            MmapOptions::new()
+                .map(file)
+                .expect("Failed to mmap test data")
+        };
+        
+        BlockDevice {
+            _file: temp_file.into_file(),
+            mmap,
+            size,
+        }
+    }
 }
 
 /// Common block range representation

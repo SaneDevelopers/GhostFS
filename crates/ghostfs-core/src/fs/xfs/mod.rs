@@ -1148,3 +1148,190 @@ pub fn is_xfs_superblock(data: &[u8]) -> bool {
     
     is_xfs
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_xfs_magic_detection() {
+        // Valid XFS magic: 0x58465342 ("XFSB")
+        let mut valid_data = vec![0u8; 512];
+        valid_data[0..4].copy_from_slice(&[0x58, 0x46, 0x53, 0x42]);
+        assert!(is_xfs_superblock(&valid_data));
+        
+        // Invalid magic
+        let invalid_data = vec![0xFF, 0xFF, 0xFF, 0xFF];
+        assert!(!is_xfs_superblock(&invalid_data));
+        
+        // Insufficient data
+        let short_data = vec![0x58, 0x46];
+        assert!(!is_xfs_superblock(&short_data));
+    }
+
+    #[test]
+    fn test_xfs_superblock_parsing() {
+        let mut data = vec![0u8; 512];
+        
+        // XFS magic: "XFSB"
+        data[0..4].copy_from_slice(&[0x58, 0x46, 0x53, 0x42]);
+        
+        // Block size: 4096 (0x1000)
+        data[4..8].copy_from_slice(&4096u32.to_be_bytes());
+        
+        // Data blocks: 10000
+        data[8..16].copy_from_slice(&10000u64.to_be_bytes());
+        
+        // AG blocks
+        data[84..88].copy_from_slice(&2500u32.to_be_bytes());
+        
+        // AG count
+        data[88..92].copy_from_slice(&4u32.to_be_bytes());
+        
+        // Sector size: 512
+        data[102..104].copy_from_slice(&512u16.to_be_bytes());
+        
+        // Inode size: 256
+        data[104..106].copy_from_slice(&256u16.to_be_bytes());
+        
+        let device = BlockDevice::from_vec(data);
+        let engine = XfsRecoveryEngine::new(device).unwrap();
+        
+        assert_eq!(engine.block_size, 4096);
+        assert_eq!(engine.ag_count, 4);
+        assert_eq!(engine.ag_blocks, 2500);
+        assert_eq!(engine.sector_size, 512);
+        assert_eq!(engine.inode_size, 256);
+        assert_eq!(engine.inodes_per_block, 16);
+    }
+
+    #[test]
+    fn test_xfs_inode_magic_validation() {
+        // XFS inode magic: "IN" (0x494E)
+        let valid_magic = XFS_INODE_MAGIC;
+        assert_eq!(valid_magic, 0x494E);
+        
+        // Verify it's the big-endian representation of "IN"
+        let bytes = valid_magic.to_be_bytes();
+        assert_eq!(bytes[0], b'I');
+        assert_eq!(bytes[1], b'N');
+    }
+
+    #[test]
+    fn test_xfs_dinode_formats() {
+        assert_eq!(XFS_DINODE_FMT_EXTENTS, 1);
+        assert_eq!(XFS_DINODE_FMT_BTREE, 2);
+        assert_eq!(XFS_DINODE_FMT_LOCAL, 3);
+    }
+
+    #[test]
+    fn test_recovery_config_adaptive_scan() {
+        let config = XfsRecoveryConfig::default();
+        
+        // Small FS (<1GB = 262144 blocks): scan all
+        assert_eq!(config.adaptive_scan_blocks(100_000), 100_000);
+        assert_eq!(config.adaptive_scan_blocks(262_144), 262_144);
+        
+        // Medium FS (262,145 - 26,214,400 blocks): scan 10%, min 10k
+        assert_eq!(config.adaptive_scan_blocks(500_000), 50_000); // 10% of 500k
+        assert_eq!(config.adaptive_scan_blocks(300_000), 30_000); // 10% of 300k
+        assert_eq!(config.adaptive_scan_blocks(1_000_000), 100_000); // 10% of 1M
+        
+        // Edge of medium FS: 5M blocks is still medium (10%)
+        assert_eq!(config.adaptive_scan_blocks(5_000_000), 500_000); // 10% of 5M
+        
+        // Large FS (>26,214,400 blocks): scan 1%, min 100k
+        assert_eq!(config.adaptive_scan_blocks(50_000_000), 500_000); // 1% of 50M
+        assert_eq!(config.adaptive_scan_blocks(100_000_000), 1_000_000); // 1% of 100M
+    }
+
+    #[test]
+    fn test_recovery_config_custom_limits() {
+        let config = XfsRecoveryConfig {
+            max_scan_blocks: Some(1000),
+            ..Default::default()
+        };
+        
+        // Should respect custom limit
+        assert_eq!(config.adaptive_scan_blocks(100_000), 1000);
+        assert_eq!(config.adaptive_scan_blocks(500), 500);
+    }
+
+    #[test]
+    fn test_recovery_config_defaults() {
+        let config = XfsRecoveryConfig::default();
+        
+        assert_eq!(config.max_scan_blocks, None);
+        assert_eq!(config.max_file_search_bytes, 10 * 1024 * 1024);
+        assert_eq!(config.text_detection_threshold, 0.75);
+        assert_eq!(config.text_sample_size, 4096);
+    }
+
+    #[test]
+    fn test_ag_calculations() {
+        // Test AG (Allocation Group) calculations
+        let mut data = vec![0u8; 512];
+        data[0..4].copy_from_slice(&[0x58, 0x46, 0x53, 0x42]); // XFS magic
+        data[4..8].copy_from_slice(&4096u32.to_be_bytes()); // block size
+        data[8..16].copy_from_slice(&1000000u64.to_be_bytes()); // data blocks
+        data[84..88].copy_from_slice(&250000u32.to_be_bytes()); // AG blocks
+        data[88..92].copy_from_slice(&4u32.to_be_bytes()); // AG count
+        
+        let device = BlockDevice::from_vec(data);
+        let engine = XfsRecoveryEngine::new(device).unwrap();
+        
+        // Should have 4 AGs
+        assert_eq!(engine.ag_count, 4);
+        assert_eq!(engine.ag_blocks, 250000);
+        
+        // Should have calculated inode table locations for each AG
+        assert_eq!(engine.ag_inode_table_blocks.len(), 4);
+    }
+
+    #[test]
+    fn test_inode_per_block_calculation() {
+        // Test with 512-byte inodes
+        let mut data = vec![0u8; 512];
+        data[0..4].copy_from_slice(&[0x58, 0x46, 0x53, 0x42]);
+        data[4..8].copy_from_slice(&4096u32.to_be_bytes());
+        data[104..106].copy_from_slice(&512u16.to_be_bytes()); // inode size
+        
+        let device = BlockDevice::from_vec(data);
+        let engine = XfsRecoveryEngine::new(device).unwrap();
+        
+        assert_eq!(engine.inode_size, 512);
+        assert_eq!(engine.inodes_per_block, 8); // 4096 / 512 = 8
+    }
+
+    #[test]
+    fn test_uuid_parsing() {
+        let mut data = vec![0u8; 512];
+        data[0..4].copy_from_slice(&[0x58, 0x46, 0x53, 0x42]);
+        data[4..8].copy_from_slice(&4096u32.to_be_bytes());
+        
+        // Set UUID
+        let test_uuid = [
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+        ];
+        data[32..48].copy_from_slice(&test_uuid);
+        
+        let device = BlockDevice::from_vec(data);
+        let engine = XfsRecoveryEngine::new(device).unwrap();
+        
+        let sb = engine.superblock.unwrap();
+        assert_eq!(sb.uuid, test_uuid);
+    }
+
+    #[test]
+    fn test_xfs_constants() {
+        // Verify XFS constants are correct
+        assert_eq!(XFS_MAGIC, 0x58465342); // "XFSB"
+        assert_eq!(XFS_INODE_MAGIC, 0x494E); // "IN"
+        
+        // Verify format constants
+        assert_eq!(XFS_DINODE_FMT_EXTENTS, 1);
+        assert_eq!(XFS_DINODE_FMT_BTREE, 2);
+        assert_eq!(XFS_DINODE_FMT_LOCAL, 3);
+    }
+}

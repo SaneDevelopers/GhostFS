@@ -73,7 +73,8 @@ done
 if [ $VIDEO_COUNT -eq 0 ]; then
     echo "  ℹ️  No video files found, creating test video placeholders..."
     sudo dd if=/dev/urandom of="$MOUNT_POINT/test-video-1.mp4" bs=1M count=50 2>/dev/null
-  Show what we have
+    # Show what we have
+fi
 echo ""
 echo "📸 Current filesystem contents:"
 sudo du -sh "$MOUNT_POINT"

@@ -1,8 +1,86 @@
 use std::path::PathBuf;
+use std::io::{self, Write};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use ghostfs_core::{scan_and_analyze, RecoverySession, RecoveryEngine, FileSystemType};
+use ghostfs_core::{FileSystemType, XfsRecoveryConfig};
+
+/// Parse user input for scan limit (e.g., "50%", "10GB", "all")
+fn parse_scan_limit(input: &str, total_blocks: u64, block_size: u32) -> Option<u64> {
+    let input = input.trim().to_lowercase();
+    
+    if input == "all" || input == "100%" {
+        return Some(total_blocks);
+    }
+    
+    // Handle percentage (e.g., "50%")
+    if let Some(percent_str) = input.strip_suffix('%') {
+        if let Ok(percent) = percent_str.parse::<f64>() {
+            if percent > 0.0 && percent <= 100.0 {
+                return Some((total_blocks as f64 * percent / 100.0) as u64);
+            }
+        }
+    }
+    
+    // Handle storage size (e.g., "10GB", "500MB", "1TB")
+    let (num_str, unit) = if input.ends_with("tb") {
+        (input.trim_end_matches("tb"), 1024u64 * 1024 * 1024 * 1024)
+    } else if input.ends_with("gb") {
+        (input.trim_end_matches("gb"), 1024u64 * 1024 * 1024)
+    } else if input.ends_with("mb") {
+        (input.trim_end_matches("mb"), 1024u64 * 1024)
+    } else if input.ends_with("kb") {
+        (input.trim_end_matches("kb"), 1024u64)
+    } else {
+        return None;
+    };
+    
+    if let Ok(size) = num_str.trim().parse::<f64>() {
+        let bytes = (size * unit as f64) as u64;
+        let blocks = bytes / block_size as u64;
+        return Some(std::cmp::min(blocks, total_blocks));
+    }
+    
+    None
+}
+
+/// Prompt user for scan limit on large filesystems
+fn prompt_scan_limit(total_blocks: u64, block_size: u32) -> Result<Option<u64>> {
+    let total_size_gb = (total_blocks * block_size as u64) as f64 / (1024.0 * 1024.0 * 1024.0);
+    
+    println!("\n⚠️  Large filesystem detected: {:.2} GB ({} blocks)", total_size_gb, total_blocks);
+    println!("   Scanning all blocks may take considerable time.");
+    println!("\n📊 Scan options:");
+    println!("   • Type 'all' or '100%' to scan entire filesystem (thorough but slow)");
+    println!("   • Type a percentage: e.g., '10%' to scan 10% of blocks");
+    println!("   • Type storage size: e.g., '50GB', '500MB', '1TB'");
+    println!("   • Press Enter for smart adaptive scan (recommended)");
+    
+    print!("\n🔍 How much do you want to scan? [adaptive]: ");
+    io::stdout().flush()?;
+    
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let input = input.trim();
+    
+    if input.is_empty() {
+        println!("✅ Using adaptive scan (smart default)");
+        return Ok(None); // Use adaptive default
+    }
+    
+    match parse_scan_limit(input, total_blocks, block_size) {
+        Some(blocks) => {
+            let percent = (blocks as f64 / total_blocks as f64) * 100.0;
+            let size_gb = (blocks * block_size as u64) as f64 / (1024.0 * 1024.0 * 1024.0);
+            println!("✅ Will scan {} blocks ({:.1}% / {:.2} GB)", blocks, percent, size_gb);
+            Ok(Some(blocks))
+        }
+        None => {
+            println!("❌ Invalid input. Using adaptive scan.");
+            Ok(None)
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "ghostfs", version, about = "GhostFS CLI - Professional Data Recovery Tool")]
@@ -53,6 +131,36 @@ enum Commands {
 	Timeline,
 }
 
+/// Get XFS recovery config with optional user prompts for large filesystems
+fn get_xfs_config_for_scan(image: &PathBuf, interactive: bool) -> Result<Option<XfsRecoveryConfig>> {
+    use ghostfs_core::fs::common::BlockDevice;
+    use ghostfs_core::fs::xfs;
+    
+    // Try to get filesystem size
+    let device = match BlockDevice::open(image) {
+        Ok(d) => d,
+        Err(_) => return Ok(None), // Can't open device, use defaults
+    };
+    
+    let (total_blocks, block_size) = match xfs::get_filesystem_size(&device) {
+        Ok(size) => size,
+        Err(_) => return Ok(None), // Not XFS or can't read, use defaults
+    };
+    
+    let total_size_gb = (total_blocks * block_size as u64) as f64 / (1024.0 * 1024.0 * 1024.0);
+    
+    // Prompt user only if filesystem is large (>100GB) and interactive mode
+    if interactive && total_size_gb > 100.0 {
+        if let Ok(Some(custom_blocks)) = prompt_scan_limit(total_blocks, block_size) {
+            let mut config = XfsRecoveryConfig::default();
+            config.max_scan_blocks = Some(custom_blocks);
+            return Ok(Some(config));
+        }
+    }
+    
+    Ok(None) // Use adaptive defaults
+}
+
 fn main() -> Result<()> {
 	// Initialize tracing
 	tracing_subscriber::fmt::init();
@@ -82,8 +190,15 @@ fn main() -> Result<()> {
 				}
 			}
 
+			// Get XFS config with interactive prompt if needed
+			let xfs_config = if fs_type == FileSystemType::Xfs {
+				get_xfs_config_for_scan(&image, true)?
+			} else {
+				None
+			};
+
 			// Perform scan
-			let session = scan_and_analyze(&image, fs_type, confidence)?;
+			let session = ghostfs_core::scan_and_analyze_with_config(&image, fs_type, confidence, xfs_config)?;
 			
 			println!("✅ Scan completed successfully!");
 			println!("📊 Session ID: {}", session.id);
@@ -135,9 +250,16 @@ fn main() -> Result<()> {
 			// Create output directory if it doesn't exist
 			std::fs::create_dir_all(&out)?;
 
+			// Get XFS config with interactive prompt if needed
+			let xfs_config = if fs_type == ghostfs_core::FileSystemType::Xfs {
+				get_xfs_config_for_scan(&image, true)?
+			} else {
+				None
+			};
+
 			// First perform scan to identify recoverable files
 			println!("🔍 Scanning for recoverable files...");
-			let session = scan_and_analyze(&image, fs_type, confidence)?;
+			let session = ghostfs_core::scan_and_analyze_with_config(&image, fs_type, confidence, xfs_config)?;
 			
 			if session.metadata.recoverable_files == 0 {
 				println!("❌ No recoverable files found with confidence >= {:.1}%", confidence * 100.0);

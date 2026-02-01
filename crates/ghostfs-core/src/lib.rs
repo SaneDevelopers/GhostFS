@@ -17,6 +17,9 @@ pub use recovery::{
     FileSignature, SignatureAnalysisResult
 };
 
+// Re-export XFS recovery config for advanced users
+pub use fs::xfs::XfsRecoveryConfig;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileSystemType {
     Xfs,
@@ -153,6 +156,16 @@ pub fn scan_image(image_path: &Path, fs: FileSystemType) -> Result<RecoverySessi
 
 /// Scan and analyze using the advanced recovery engine
 pub fn scan_and_analyze(image_path: &Path, fs: FileSystemType, confidence_threshold: f32) -> Result<RecoverySession> {
+    scan_and_analyze_with_config(image_path, fs, confidence_threshold, None)
+}
+
+/// Scan and analyze with custom XFS configuration
+pub fn scan_and_analyze_with_config(
+    image_path: &Path, 
+    fs: FileSystemType, 
+    confidence_threshold: f32,
+    xfs_config: Option<fs::xfs::XfsRecoveryConfig>
+) -> Result<RecoverySession> {
     use recovery::{RecoveryEngine, RecoveryConfig, ScanDepth, RecoveryStrategy};
     use memmap2::MmapOptions;
     use std::fs::File;
@@ -169,6 +182,7 @@ pub fn scan_and_analyze(image_path: &Path, fs: FileSystemType, confidence_thresh
             RecoveryStrategy::FileSignatureScan,
             RecoveryStrategy::MetadataReconstruction,
         ],
+        xfs_config,
         ..Default::default()
     };
     

@@ -1,14 +1,14 @@
+use chrono::{DateTime, Utc};
+use memmap2::Mmap;
 /// Advanced file recovery algorithms and strategies
 use std::collections::HashMap;
-use memmap2::Mmap;
-use chrono::{DateTime, Utc};
 
 use crate::{
-    DeletedFile, FileSystemType, FileType, FileMetadata, BlockRange,
     recovery::{
-        confidence::{ConfidenceContext, calculate_confidence_score, ActivityLevel},
+        confidence::{calculate_confidence_score, ActivityLevel, ConfidenceContext},
         signatures::{analyze_file_signature, extract_content_metadata, SignatureMatch},
-    }
+    },
+    BlockRange, DeletedFile, FileMetadata, FileSystemType, FileType,
 };
 
 /// Recovery engine configuration
@@ -135,7 +135,7 @@ impl RecoveryEngine {
 
         // Phase 1: File system analysis
         let fs_context = self.analyze_filesystem()?;
-        
+
         // Phase 2: Execute recovery strategies
         let strategies = self.config.recovery_strategies.clone();
         for (i, strategy) in strategies.iter().enumerate() {
@@ -177,14 +177,21 @@ impl RecoveryEngine {
             current_operation: "Recovery complete".to_string(),
         });
 
-        tracing::info!("🎯 Final recovery stats: {} total files, {} pass confidence threshold", 
-            self.recovered_files.len(), 
-            self.recovered_files.iter().filter(|f| f.confidence_score >= self.config.min_confidence_threshold).count());
+        tracing::info!(
+            "🎯 Final recovery stats: {} total files, {} pass confidence threshold",
+            self.recovered_files.len(),
+            self.recovered_files
+                .iter()
+                .filter(|f| f.confidence_score >= self.config.min_confidence_threshold)
+                .count()
+        );
 
         Ok(RecoveryResult {
             session_id: self.session_id.clone(),
             total_files_found: self.recovered_files.len(),
-            recoverable_files: self.recovered_files.iter()
+            recoverable_files: self
+                .recovered_files
+                .iter()
                 .filter(|f| f.confidence_score >= self.config.min_confidence_threshold)
                 .count(),
             files: self.recovered_files.clone(),
@@ -224,7 +231,7 @@ impl RecoveryEngine {
                     // Use adaptive defaults
                     crate::fs::xfs::XfsRecoveryEngine::new(device)
                 };
-                
+
                 match xfs_engine {
                     Ok(engine) => {
                         match engine.scan_deleted_files() {
@@ -232,7 +239,10 @@ impl RecoveryEngine {
                                 tracing::info!("🔄 XFS engine returned {} files", files.len());
                                 // Merge scanned files into recovered_files
                                 self.recovered_files.append(&mut files);
-                                tracing::info!("🔄 Total recovered files after XFS merge: {}", self.recovered_files.len());
+                                tracing::info!(
+                                    "🔄 Total recovered files after XFS merge: {}",
+                                    self.recovered_files.len()
+                                );
                             }
                             Err(e) => tracing::warn!("XFS scan_deleted_files failed: {:?}", e),
                         }
@@ -271,15 +281,19 @@ impl RecoveryEngine {
         file.sync_all()?;
 
         // Open as BlockDevice
-        let bd = crate::fs::common::BlockDevice::open(&tmp_path)
-            .map_err(|e| RecoveryError::IoError(std::io::Error::new(std::io::ErrorKind::Other, format!("BlockDevice open failed: {}", e))))?;
+        let bd = crate::fs::common::BlockDevice::open(&tmp_path).map_err(|e| {
+            RecoveryError::IoError(std::io::Error::other(format!(
+                "BlockDevice open failed: {}",
+                e
+            )))
+        })?;
 
         Ok(bd)
     }
 
     fn analyze_btrfs_filesystem(&mut self) -> Result<FileSystemContext, RecoveryError> {
         tracing::info!("RecoveryEngine: Starting Btrfs filesystem analysis");
-        
+
         // Try to use the Btrfs recovery engine
         match self.create_block_device() {
             Ok(device) => {
@@ -298,7 +312,7 @@ impl RecoveryEngine {
                 tracing::warn!("Failed to create block device for Btrfs: {:?}", e);
             }
         }
-        
+
         // Return filesystem context
         Ok(FileSystemContext {
             fs_type: FileSystemType::Btrfs,
@@ -316,7 +330,7 @@ impl RecoveryEngine {
 
     fn analyze_exfat_filesystem(&mut self) -> Result<FileSystemContext, RecoveryError> {
         tracing::info!("RecoveryEngine: Starting exFAT filesystem analysis");
-        
+
         // Try to use the exFAT recovery engine
         match self.create_block_device() {
             Ok(device) => {
@@ -335,7 +349,7 @@ impl RecoveryEngine {
                 tracing::warn!("Failed to create block device for exFAT: {:?}", e);
             }
         }
-        
+
         // Return filesystem context
         Ok(FileSystemContext {
             fs_type: FileSystemType::ExFat,
@@ -433,21 +447,18 @@ impl RecoveryEngine {
         while offset < self.device_map.len() {
             let end = std::cmp::min(offset + chunk_size, self.device_map.len());
             let chunk = &self.device_map[offset..end];
-            
+
             // Analyze chunk for file signatures
             let signature_result = analyze_file_signature(chunk, 1024);
-            
+
             for signature_match in signature_result.matches {
                 if signature_match.confidence > 0.7 {
-                    let deleted_file = self.create_file_from_signature(
-                        offset,
-                        &signature_match,
-                        chunk,
-                    )?;
+                    let deleted_file =
+                        self.create_file_from_signature(offset, &signature_match, chunk)?;
                     self.recovered_files.push(deleted_file);
                 }
             }
-            
+
             offset += chunk_size;
         }
 
@@ -463,7 +474,10 @@ impl RecoveryEngine {
         Ok(())
     }
 
-    fn calculate_confidence_scores(&mut self, context: &FileSystemContext) -> Result<(), RecoveryError> {
+    fn calculate_confidence_scores(
+        &mut self,
+        context: &FileSystemContext,
+    ) -> Result<(), RecoveryError> {
         let confidence_context = ConfidenceContext {
             fs_type: context.fs_type,
             scan_time: Utc::now(),
@@ -477,32 +491,46 @@ impl RecoveryEngine {
             let calculated_confidence = calculate_confidence_score(file, &confidence_context);
             // Take the maximum of original and calculated confidence to preserve high-quality filesystem-specific scores
             file.confidence_score = original_confidence.max(calculated_confidence);
-            tracing::info!("🎯 File {} confidence: {} -> {} (calculated: {})", 
-                file.id, original_confidence, file.confidence_score, calculated_confidence);
+            tracing::info!(
+                "🎯 File {} confidence: {} -> {} (calculated: {})",
+                file.id,
+                original_confidence,
+                file.confidence_score,
+                calculated_confidence
+            );
         }
 
         Ok(())
     }
 
     fn final_validation(&mut self) -> Result<(), RecoveryError> {
-        tracing::info!("🔍 Final validation: {} files before filtering (threshold: {})", 
-            self.recovered_files.len(), self.config.min_confidence_threshold);
-        
+        tracing::info!(
+            "🔍 Final validation: {} files before filtering (threshold: {})",
+            self.recovered_files.len(),
+            self.config.min_confidence_threshold
+        );
+
         // Filter out files below confidence threshold
         self.recovered_files.retain(|file| {
             let keep = file.confidence_score >= self.config.min_confidence_threshold;
             if !keep {
-                tracing::info!("❌ Filtering out file {} with confidence {}", file.id, file.confidence_score);
+                tracing::info!(
+                    "❌ Filtering out file {} with confidence {}",
+                    file.id,
+                    file.confidence_score
+                );
             }
             keep
         });
 
-        tracing::info!("✅ Final validation: {} files after filtering", self.recovered_files.len());
+        tracing::info!(
+            "✅ Final validation: {} files after filtering",
+            self.recovered_files.len()
+        );
 
         // Sort by confidence score (highest first)
-        self.recovered_files.sort_by(|a, b| {
-            b.confidence_score.partial_cmp(&a.confidence_score).unwrap()
-        });
+        self.recovered_files
+            .sort_by(|a, b| b.confidence_score.partial_cmp(&a.confidence_score).unwrap());
 
         Ok(())
     }
@@ -577,6 +605,7 @@ impl RecoveryEngine {
                 accessed_time: None,
                 extended_attributes: HashMap::new(),
             },
+            fs_metadata: None, // Signature-based recovery has no filesystem metadata
         })
     }
 
@@ -589,17 +618,17 @@ impl RecoveryEngine {
 
     fn generate_statistics(&self) -> RecoveryStatistics {
         let mut stats = RecoveryStatistics::default();
-        
+
         for file in &self.recovered_files {
             stats.total_files += 1;
             stats.total_size += file.size;
-            
+
             match file.confidence_score {
                 s if s >= 0.8 => stats.high_confidence_files += 1,
                 s if s >= 0.6 => stats.medium_confidence_files += 1,
                 _ => stats.low_confidence_files += 1,
             }
-            
+
             // Count by file type
             if let Some(ref mime_type) = file.metadata.mime_type {
                 if mime_type.starts_with("image/") {
@@ -615,7 +644,7 @@ impl RecoveryEngine {
                 }
             }
         }
-        
+
         stats
     }
 }

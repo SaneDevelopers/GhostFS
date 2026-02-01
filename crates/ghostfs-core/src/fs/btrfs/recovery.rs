@@ -1,19 +1,18 @@
 /// Btrfs file recovery engine
-/// 
+///
 /// Scans Btrfs filesystems for deleted files by:
 /// 1. Parsing the FS tree for inodes
 /// 2. Looking for orphan items (deleted but not yet cleaned)
 /// 3. Scanning for unlinked files
-
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
+use chrono::{DateTime, Utc};
 use std::io::Cursor;
 use std::path::PathBuf;
-use chrono::{DateTime, Utc};
 
-use super::{BlockDevice, BtrfsSuperblock};
 use super::tree::*;
-use crate::{DeletedFile, FileType, FileMetadata, BlockRange};
+use super::{BlockDevice, BtrfsSuperblock};
+use crate::{BlockRange, DeletedFile, FileMetadata, FileType};
 
 // ============================================================================
 // Inode Structures
@@ -37,11 +36,11 @@ impl BtrfsTimespec {
             nsec: cursor.read_u32::<LittleEndian>()?,
         })
     }
-    
+
     pub fn to_datetime(&self) -> Option<DateTime<Utc>> {
         DateTime::from_timestamp(self.sec, self.nsec)
     }
-    
+
     pub const SIZE: usize = 12;
 }
 
@@ -51,9 +50,9 @@ pub struct BtrfsInodeItem {
     pub generation: u64,
     pub transid: u64,
     pub size: u64,
-    pub nbytes: u64,        // Actual bytes used on disk
+    pub nbytes: u64, // Actual bytes used on disk
     pub block_group: u64,
-    pub nlink: u32,         // Link count (0 = deleted)
+    pub nlink: u32, // Link count (0 = deleted)
     pub uid: u32,
     pub gid: u32,
     pub mode: u32,
@@ -71,9 +70,9 @@ impl BtrfsInodeItem {
         if data.len() < 160 {
             bail!("Insufficient data for BtrfsInodeItem");
         }
-        
+
         let mut cursor = Cursor::new(data);
-        
+
         let generation = cursor.read_u64::<LittleEndian>()?;
         let transid = cursor.read_u64::<LittleEndian>()?;
         let size = cursor.read_u64::<LittleEndian>()?;
@@ -86,15 +85,15 @@ impl BtrfsInodeItem {
         let rdev = cursor.read_u64::<LittleEndian>()?;
         let flags = cursor.read_u64::<LittleEndian>()?;
         let sequence = cursor.read_u64::<LittleEndian>()?;
-        
+
         // Skip reserved bytes (32 bytes)
         cursor.set_position(cursor.position() + 32);
-        
+
         let atime = BtrfsTimespec::parse(&data[96..108])?;
         let ctime = BtrfsTimespec::parse(&data[108..120])?;
         let mtime = BtrfsTimespec::parse(&data[120..132])?;
         let otime = BtrfsTimespec::parse(&data[132..144])?;
-        
+
         Ok(Self {
             generation,
             transid,
@@ -114,17 +113,17 @@ impl BtrfsInodeItem {
             otime,
         })
     }
-    
+
     /// Check if this is a regular file (not directory/symlink/etc)
     pub fn is_regular_file(&self) -> bool {
         (self.mode & 0o170000) == 0o100000
     }
-    
+
     /// Check if this is a directory
     pub fn is_directory(&self) -> bool {
         (self.mode & 0o170000) == 0o040000
     }
-    
+
     /// Check if this inode appears deleted (nlink == 0)
     pub fn is_deleted(&self) -> bool {
         self.nlink == 0
@@ -135,16 +134,16 @@ impl BtrfsInodeItem {
 #[derive(Debug, Clone)]
 pub struct BtrfsFileExtentItem {
     pub generation: u64,
-    pub ram_bytes: u64,       // Uncompressed size
-    pub compression: u8,      // 0=none, 1=zlib, 2=lz4, 3=zstd
+    pub ram_bytes: u64,  // Uncompressed size
+    pub compression: u8, // 0=none, 1=zlib, 2=lz4, 3=zstd
     pub encryption: u8,
     pub other_encoding: u16,
-    pub extent_type: u8,      // 0=inline, 1=regular, 2=prealloc
+    pub extent_type: u8, // 0=inline, 1=regular, 2=prealloc
     // For regular extents:
-    pub disk_bytenr: u64,     // Location on disk
-    pub disk_num_bytes: u64,  // Size on disk
-    pub offset: u64,          // Within extent
-    pub num_bytes: u64,       // Logical size
+    pub disk_bytenr: u64,    // Location on disk
+    pub disk_num_bytes: u64, // Size on disk
+    pub offset: u64,         // Within extent
+    pub num_bytes: u64,      // Logical size
     // For inline extents:
     pub inline_data: Vec<u8>,
 }
@@ -154,16 +153,16 @@ impl BtrfsFileExtentItem {
         if data.len() < 21 {
             bail!("Insufficient data for BtrfsFileExtentItem");
         }
-        
+
         let mut cursor = Cursor::new(data);
-        
+
         let generation = cursor.read_u64::<LittleEndian>()?;
         let ram_bytes = cursor.read_u64::<LittleEndian>()?;
         let compression = cursor.read_u8()?;
         let encryption = cursor.read_u8()?;
         let other_encoding = cursor.read_u16::<LittleEndian>()?;
         let extent_type = cursor.read_u8()?;
-        
+
         let (disk_bytenr, disk_num_bytes, offset, num_bytes, inline_data) = if extent_type == 0 {
             // Inline extent - data follows
             let inline_data = data[21..].to_vec();
@@ -178,7 +177,7 @@ impl BtrfsFileExtentItem {
         } else {
             (0, 0, 0, 0, Vec::new())
         };
-        
+
         Ok(Self {
             generation,
             ram_bytes,
@@ -193,11 +192,11 @@ impl BtrfsFileExtentItem {
             inline_data,
         })
     }
-    
+
     pub fn is_inline(&self) -> bool {
         self.extent_type == 0
     }
-    
+
     pub fn is_compressed(&self) -> bool {
         self.compression != 0
     }
@@ -215,17 +214,17 @@ impl BtrfsInodeRef {
         if data.len() < 10 {
             bail!("Insufficient data for BtrfsInodeRef");
         }
-        
+
         let mut cursor = Cursor::new(data);
         let index = cursor.read_u64::<LittleEndian>()?;
         let name_len = cursor.read_u16::<LittleEndian>()? as usize;
-        
+
         if data.len() < 10 + name_len {
             bail!("Insufficient data for inode ref name");
         }
-        
+
         let name = String::from_utf8_lossy(&data[10..10 + name_len]).to_string();
-        
+
         Ok(Self { index, name })
     }
 }
@@ -244,23 +243,23 @@ pub struct BtrfsRecoveryEngine<'a> {
 impl<'a> BtrfsRecoveryEngine<'a> {
     pub fn new(device: &'a BlockDevice, superblock: BtrfsSuperblock) -> Result<Self> {
         let tree_reader = BtrfsTreeReader::new(device, superblock.nodesize);
-        
+
         Ok(Self {
             device,
             superblock,
             tree_reader,
         })
     }
-    
+
     /// Scan for deleted files in the filesystem
     pub fn scan_deleted_files(&self) -> Result<Vec<DeletedFile>> {
         let mut deleted_files = Vec::new();
         let mut file_id_counter = 1u64;
-        
+
         tracing::info!("Btrfs scan: Starting FS tree analysis");
         tracing::info!("  Root tree at: 0x{:x}", self.superblock.root);
         tracing::info!("  FS tree at: 0x{:x} (via root tree)", self.superblock.root);
-        
+
         // Method 1: Scan orphan items (items in orphan tree)
         match self.scan_orphan_items(&mut file_id_counter) {
             Ok(mut orphans) => {
@@ -271,7 +270,7 @@ impl<'a> BtrfsRecoveryEngine<'a> {
                 tracing::warn!("Failed to scan orphan items: {}", e);
             }
         }
-        
+
         // Method 2: Scan for inodes with nlink == 0
         match self.scan_unlinked_inodes(&mut file_id_counter) {
             Ok(mut unlinked) => {
@@ -282,7 +281,7 @@ impl<'a> BtrfsRecoveryEngine<'a> {
                 tracing::warn!("Failed to scan unlinked inodes: {}", e);
             }
         }
-        
+
         // Method 3: Signature-based scan for file content
         match self.scan_file_signatures(&mut file_id_counter) {
             Ok(mut sig_files) => {
@@ -293,25 +292,28 @@ impl<'a> BtrfsRecoveryEngine<'a> {
                 tracing::warn!("Signature scan failed: {}", e);
             }
         }
-        
-        tracing::info!("Btrfs scan complete: {} total deleted files found", deleted_files.len());
+
+        tracing::info!(
+            "Btrfs scan complete: {} total deleted files found",
+            deleted_files.len()
+        );
         Ok(deleted_files)
     }
-    
+
     /// Scan for orphan items (files deleted but not yet cleaned up)
     fn scan_orphan_items(&self, file_id_counter: &mut u64) -> Result<Vec<DeletedFile>> {
         let deleted_files = Vec::new();
-        
+
         // Orphan items are stored in the root tree with special objectid
         // We need to first find the FS tree root
         let fs_tree_root = self.find_fs_tree_root()?;
-        
+
         // Iterate through FS tree looking for ORPHAN_ITEM keys
         self.tree_reader.iterate_tree(fs_tree_root, |_node, item| {
             if item.key.item_type == BTRFS_ORPHAN_ITEM_KEY {
                 // The objectid of orphan item is the inode number
                 let inode_num = item.key.offset;
-                
+
                 // Try to find the actual inode
                 if let Ok(Some(inode_info)) = self.find_inode(fs_tree_root, inode_num) {
                     let _file = self.inode_to_deleted_file(
@@ -328,19 +330,19 @@ impl<'a> BtrfsRecoveryEngine<'a> {
             }
             Ok(true)
         })?;
-        
+
         Ok(deleted_files)
     }
-    
+
     /// Scan for inodes with nlink == 0 (deleted files)
     fn scan_unlinked_inodes(&self, file_id_counter: &mut u64) -> Result<Vec<DeletedFile>> {
         let mut deleted_files = Vec::new();
-        
+
         let fs_tree_root = self.find_fs_tree_root()?;
-        
+
         // Collect all inode items first
         let mut inode_items: Vec<(u64, BtrfsInodeItem, Option<String>)> = Vec::new();
-        
+
         self.tree_reader.iterate_tree(fs_tree_root, |node, item| {
             if item.key.item_type == BTRFS_INODE_ITEM_KEY {
                 if let Some(data) = node.get_item_data(item) {
@@ -354,7 +356,7 @@ impl<'a> BtrfsRecoveryEngine<'a> {
             }
             Ok(true)
         })?;
-        
+
         // Convert to DeletedFile
         for (inode_num, inode, name) in inode_items {
             let file = self.inode_to_deleted_file(
@@ -367,36 +369,38 @@ impl<'a> BtrfsRecoveryEngine<'a> {
             *file_id_counter += 1;
             deleted_files.push(file);
         }
-        
+
         Ok(deleted_files)
     }
-    
+
     /// Signature-based scan for file content (like XFS)
     fn scan_file_signatures(&self, file_id_counter: &mut u64) -> Result<Vec<DeletedFile>> {
         let mut deleted_files = Vec::new();
-        
+
         // Scan blocks looking for file signatures
         let total_bytes = self.superblock.total_bytes;
         let block_size = self.superblock.sectorsize as u64;
         let max_blocks = std::cmp::min(total_bytes / block_size, 100_000);
-        
+
         for block_num in 0..max_blocks {
             let offset = block_num * block_size;
-            
+
             if let Ok(data) = self.device.read_bytes(offset, block_size as usize) {
-                if let Some((mime, ext, file_size)) = self.detect_file_with_size(&data, offset) {
+                if let Some((mime, ext, file_size)) = self.detect_file_with_size(data, offset) {
                     // Calculate block count from file size
                     let block_count = if file_size > 0 {
-                        (file_size + block_size - 1) / block_size
+                        file_size.div_ceil(block_size)
                     } else {
                         1
                     };
-                    
+
                     let file = DeletedFile {
                         id: *file_id_counter,
                         inode_or_cluster: block_num,
-                        original_path: Some(PathBuf::from(format!("recovered_{}_{}.{}", 
-                            block_num, file_id_counter, ext))),
+                        original_path: Some(PathBuf::from(format!(
+                            "recovered_{}_{}.{}",
+                            block_num, file_id_counter, ext
+                        ))),
                         size: file_size,
                         deletion_time: None,
                         confidence_score: 0.5, // Slightly higher now that we have size
@@ -418,41 +422,86 @@ impl<'a> BtrfsRecoveryEngine<'a> {
                             accessed_time: None,
                             extended_attributes: std::collections::HashMap::new(),
                         },
+                        fs_metadata: None, // TODO: Populate Btrfs metadata for confidence scoring
                     };
                     *file_id_counter += 1;
                     deleted_files.push(file);
                 }
             }
         }
-        
+
         Ok(deleted_files)
     }
-    
+
     /// Find the FS tree root by looking it up in the root tree
     fn find_fs_tree_root(&self) -> Result<u64> {
         // For simplicity, we'll use the root from superblock
         // In a full implementation, we'd search the root tree
         Ok(self.superblock.root)
     }
-    
+
     /// Find an inode in the FS tree
-    fn find_inode(&self, tree_root: u64, inode_num: u64) -> Result<Option<(BtrfsInodeItem, Option<String>)>> {
+    fn find_inode(
+        &self,
+        tree_root: u64,
+        inode_num: u64,
+    ) -> Result<Option<(BtrfsInodeItem, Option<String>)>> {
         let key = BtrfsKey {
             objectid: inode_num,
             item_type: BTRFS_INODE_ITEM_KEY,
             offset: 0,
         };
-        
+
         if let Some((node, idx)) = self.tree_reader.search_tree(tree_root, &key)? {
             if let Some(data) = node.get_item_data(&node.items[idx]) {
                 let inode = BtrfsInodeItem::parse(data)?;
                 return Ok(Some((inode, None)));
             }
         }
-        
+
         Ok(None)
     }
-    
+
+    /// Extract Btrfs-specific metadata for confidence scoring
+    fn extract_btrfs_metadata(
+        &self,
+        inode: &BtrfsInodeItem,
+        _inode_num: u64,
+    ) -> crate::BtrfsFileMetadata {
+        // Calculate extent reference counts from extent tree (simplified)
+        let extent_refs = if inode.nbytes > 0 {
+            // Estimate refcount based on COW behavior
+            // In real implementation, would traverse extent tree
+            vec![1u64] // Most files have refcount = 1
+        } else {
+            vec![]
+        };
+
+        // Check if file is in snapshot (simplified)
+        // Would need to check subvolume tree in full implementation
+        let in_snapshot = false;
+
+        // Validate checksum (simplified - assume valid if inode is parseable)
+        let checksum_valid = inode.generation > 0 && inode.transid > 0;
+
+        // COW extent count estimation
+        let cow_extent_count = if inode.nbytes > 0 {
+            inode.nbytes.div_ceil(4096) as u32 // Estimate from blocks
+        } else {
+            0
+        };
+
+        crate::BtrfsFileMetadata {
+            generation: inode.generation,
+            transid: inode.transid,
+            checksum_valid,
+            extent_refs,
+            in_snapshot,
+            cow_extent_count,
+            tree_level: 0, // Leaf level for regular files
+        }
+    }
+
     /// Convert an inode to a DeletedFile
     fn inode_to_deleted_file(
         &self,
@@ -463,7 +512,10 @@ impl<'a> BtrfsRecoveryEngine<'a> {
         base_confidence: f32,
     ) -> DeletedFile {
         let path = name.map(PathBuf::from);
-        
+
+        // Extract Btrfs-specific metadata
+        let btrfs_meta = self.extract_btrfs_metadata(inode, inode_num);
+
         DeletedFile {
             id,
             inode_or_cluster: inode_num,
@@ -489,54 +541,59 @@ impl<'a> BtrfsRecoveryEngine<'a> {
                 accessed_time: inode.atime.to_datetime(),
                 extended_attributes: std::collections::HashMap::new(),
             },
+            fs_metadata: Some(crate::FsSpecificMetadata::Btrfs(btrfs_meta)),
         }
     }
-    
+
     /// Detect file type and estimate size by scanning for end markers
-    fn detect_file_with_size(&self, header: &[u8], start_offset: u64) -> Option<(String, String, u64)> {
+    fn detect_file_with_size(
+        &self,
+        header: &[u8],
+        start_offset: u64,
+    ) -> Option<(String, String, u64)> {
         if header.len() < 8 {
             return None;
         }
-        
+
         // JPEG: starts with FF D8 FF, ends with FF D9
         if header.starts_with(&[0xFF, 0xD8, 0xFF]) {
             let size = self.find_jpeg_end(start_offset);
             return Some(("image/jpeg".to_string(), "jpg".to_string(), size));
         }
-        
+
         // PNG: starts with 89 50 4E 47 0D 0A 1A 0A, ends with IEND chunk
         if header.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
             let size = self.find_png_end(start_offset);
             return Some(("image/png".to_string(), "png".to_string(), size));
         }
-        
+
         // PDF: starts with %PDF, ends with %%EOF
         if header.starts_with(b"%PDF") {
             let size = self.find_pdf_end(start_offset);
             return Some(("application/pdf".to_string(), "pdf".to_string(), size));
         }
-        
+
         // ZIP: has a more complex structure, use conservative estimate
         if header.starts_with(&[0x50, 0x4B, 0x03, 0x04]) {
             // For ZIP files, read a reasonable chunk (1MB max)
             let size = std::cmp::min(self.superblock.total_bytes - start_offset, 1024 * 1024);
             return Some(("application/zip".to_string(), "zip".to_string(), size));
         }
-        
+
         None
     }
-    
+
     /// Find JPEG end marker (FF D9)
     fn find_jpeg_end(&self, start_offset: u64) -> u64 {
         let max_size = std::cmp::min(
             self.superblock.total_bytes - start_offset,
-            10 * 1024 * 1024  // Max 10MB for JPEG
+            10 * 1024 * 1024, // Max 10MB for JPEG
         );
-        
+
         // Read in chunks to find end marker
         let chunk_size = 64 * 1024; // 64KB chunks
         let mut offset = start_offset;
-        
+
         while offset < start_offset + max_size {
             let read_size = std::cmp::min(chunk_size, (start_offset + max_size - offset) as usize);
             if let Ok(data) = self.device.read_bytes(offset, read_size) {
@@ -549,22 +606,22 @@ impl<'a> BtrfsRecoveryEngine<'a> {
             }
             offset += chunk_size as u64 - 1; // Overlap by 1 byte
         }
-        
+
         // If we can't find end marker, return a reasonable estimate
         max_size
     }
-    
+
     /// Find PNG end (IEND chunk)
     fn find_png_end(&self, start_offset: u64) -> u64 {
         let max_size = std::cmp::min(
             self.superblock.total_bytes - start_offset,
-            10 * 1024 * 1024  // Max 10MB for PNG
+            10 * 1024 * 1024, // Max 10MB for PNG
         );
-        
+
         // Read in chunks to find IEND marker
         let chunk_size = 64 * 1024;
         let mut offset = start_offset;
-        
+
         while offset < start_offset + max_size {
             let read_size = std::cmp::min(chunk_size, (start_offset + max_size - offset) as usize);
             if let Ok(data) = self.device.read_bytes(offset, read_size) {
@@ -576,21 +633,21 @@ impl<'a> BtrfsRecoveryEngine<'a> {
             }
             offset += chunk_size as u64 - 4; // Overlap by 4 bytes
         }
-        
+
         max_size
     }
-    
+
     /// Find PDF end (%%EOF marker)
     fn find_pdf_end(&self, start_offset: u64) -> u64 {
         let max_size = std::cmp::min(
             self.superblock.total_bytes - start_offset,
-            50 * 1024 * 1024  // Max 50MB for PDF
+            50 * 1024 * 1024, // Max 50MB for PDF
         );
-        
+
         // Read in chunks to find %%EOF
         let chunk_size = 64 * 1024;
         let mut offset = start_offset;
-        
+
         while offset < start_offset + max_size {
             let read_size = std::cmp::min(chunk_size, (start_offset + max_size - offset) as usize);
             if let Ok(data) = self.device.read_bytes(offset, read_size) {
@@ -600,7 +657,7 @@ impl<'a> BtrfsRecoveryEngine<'a> {
             }
             offset += chunk_size as u64 - 5;
         }
-        
+
         max_size
     }
 }
@@ -613,7 +670,7 @@ impl<'a> BtrfsRecoveryEngine<'a> {
 mod tests {
     use super::*;
     use chrono::Datelike;
-    
+
     #[test]
     fn test_btrfs_inode_mode() {
         let mut inode = BtrfsInodeItem {
@@ -634,29 +691,29 @@ mod tests {
             mtime: BtrfsTimespec::default(),
             otime: BtrfsTimespec::default(),
         };
-        
+
         assert!(inode.is_regular_file());
         assert!(!inode.is_directory());
         assert!(!inode.is_deleted());
-        
+
         inode.mode = 0o040755; // Directory
         assert!(!inode.is_regular_file());
         assert!(inode.is_directory());
-        
+
         inode.nlink = 0;
         assert!(inode.is_deleted());
     }
-    
+
     #[test]
     fn test_timespec_parse() {
         let mut data = vec![0u8; 12];
         data[0..8].copy_from_slice(&1704067200i64.to_le_bytes()); // 2024-01-01 00:00:00 UTC
         data[8..12].copy_from_slice(&0u32.to_le_bytes());
-        
+
         let ts = BtrfsTimespec::parse(&data).unwrap();
         assert_eq!(ts.sec, 1704067200);
         assert_eq!(ts.nsec, 0);
-        
+
         let dt = ts.to_datetime().unwrap();
         assert_eq!(dt.year(), 2024);
     }

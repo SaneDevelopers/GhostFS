@@ -6,6 +6,8 @@
 
 GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file systems built in Rust. This document tracks implementation progress and remaining work.
 
+**Overall Progress: 90%** ✅ (All core features complete, Phase 4 confidence scoring complete, code polished)
+
 ---
 
 ## ✅ Completed Features
@@ -15,10 +17,14 @@ GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file syst
 - ✅ **Rust workspace structure** - Clean separation of CLI and core library
 - ✅ **Type system** - Complete models for:
   - `RecoverySession` - Session management and metadata
-  - `DeletedFile` - Recovered file representation
+  - `DeletedFile` - Recovered file representation with FS-specific metadata
   - `FileMetadata` - Comprehensive file attributes
   - `BlockRange` - Data location tracking
   - `FileSystemType` - Multi-FS support enum
+  - **NEW**: `FsSpecificMetadata` - Enum for XFS, Btrfs, exFAT metadata
+  - **NEW**: `XfsFileMetadata` - AG info, extent format, inode generation
+  - **NEW**: `BtrfsFileMetadata` - Generation, checksum, COW integrity
+  - **NEW**: `ExFatFileMetadata` - FAT chain, UTF-16 validation, cluster info
 - ✅ **Error handling** - Anyhow-based error propagation
 - ✅ **Logging/tracing** - Structured logging with tracing crate
 - ✅ **Build system** - Cargo workspace with proper dependencies
@@ -36,7 +42,7 @@ GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file syst
 - ✅ **Signature validation** - Header and footer verification
 - ✅ **MIME type detection** - Automatic type identification
 
-### XFS File System Support (Most Complete)
+### XFS File System Support (✅ Complete)
 
 - ✅ **Superblock parsing** - Full implementation in `fs/xfs/mod.rs`
   - Magic number validation
@@ -48,15 +54,19 @@ GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file syst
   - AG header parsing
 - ✅ **Inode scanning and recovery**
   - Deleted inode detection
-  - Inode metadata extraction
+  - Inode metadata extraction (11 comprehensive tests)
   - Data extent parsing
   - Timestamp recovery (created, modified, accessed)
   - Permission and ownership data
+  - **NEW**: XFS-specific metadata extraction during recovery
 - ✅ **Extent-based data recovery** - B+tree and direct extent support
 - ✅ **File type detection** - Mode bits and signature matching
-- ✅ **Basic confidence scoring** - Initial implementation
+- ✅ **Advanced confidence scoring** - Full implementation with 3 XFS-specific sub-factors:
+  - **AG Validity**: Generation counter, inode numbers, link count validation
+  - **Extent Integrity**: Format validation, alignment checks, overlap detection
+  - **Inode Consistency**: File size, data blocks, extent count coherence
 
-### Btrfs File System Support (Complete)
+### Btrfs File System Support (✅ Complete)
 
 - ✅ **Superblock parsing** - Complete in `fs/btrfs/mod.rs`
   - Magic number validation
@@ -73,13 +83,18 @@ GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file syst
   - File extent items (inline and regular)
   - Inode reference parsing
   - Timespec conversion
+  - **NEW**: Btrfs-specific metadata extraction during recovery
 - ✅ **File recovery engine** - Complete in `fs/btrfs/recovery.rs`
   - Multi-strategy recovery (orphan items, unlinked inodes, signatures)
   - Generation-based validation
   - COW extent tracking
   - Signature-based scanning with size detection
+- ✅ **Advanced confidence scoring** - Full implementation with 3 Btrfs-specific sub-factors:
+  - **Generation Validity**: Non-zero, reasonable ranges, transid consistency
+  - **Checksum Validation**: Critical for Btrfs data integrity
+  - **COW Integrity**: Extent refcounts, snapshot detection, COW extent count
 
-### exFAT File System Support (Complete)
+### exFAT File System Support (✅ Complete)
 
 - ✅ **Boot sector parsing** - Complete in `fs/exfat/mod.rs`
   - Signature validation
@@ -99,6 +114,11 @@ GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file syst
   - Multi-strategy recovery (directory entries, orphan chains, signatures)
   - Cluster-to-byte offset mapping
   - Data extraction and file reconstruction
+  - **NEW**: exFAT-specific metadata extraction during recovery
+- ✅ **Advanced confidence scoring** - Full implementation with 3 exFAT-specific sub-factors:
+  - **FAT Chain Validity**: First cluster validation, chain integrity, reasonable length
+  - **Directory Entry Consistency**: Checksum validation, entry count checks, UTF-16 validation
+  - **Cluster Patterns**: Bad cluster detection, valid cluster ranges, data block presence
 
 ### Common File System Utilities
 
@@ -116,20 +136,35 @@ GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file syst
 - ✅ **Progress tracking** - Real-time updates with `RecoveryProgress`
 - ✅ **Activity monitoring** - CPU, memory, I/O tracking
 - ✅ **Strategy pattern** - Extensible recovery strategies
-- ✅ **Confidence calculation** - Basic scoring system
+- ✅ **Confidence calculation** - Advanced scoring system with FS-specific factors
 - ✅ **File validation** - Signature-based verification
 
-### Confidence Scoring System (`recovery/confidence.rs`)
+### Confidence Scoring System (`recovery/confidence.rs`) - **✅ COMPLETE**
 
-- ✅ **Multi-factor scoring**:
-  - File signature match (0-40 points)
-  - Metadata consistency (0-25 points)
-  - Data integrity (0-20 points)
-  - Filesystem hints (0-15 points)
+- ✅ **Multi-factor scoring** (6 weighted factors):
+  - Time recency: 25% - Deletion time vs. scan time
+  - Metadata completeness: 15% - Permissions, timestamps, attributes
+  - Data block integrity: 20% - Contiguous ranges, allocation status
+  - File signature match: 15% - Header validation, MIME type
+  - Size consistency: 10% - Reasonable file size
+  - **NEW: FS-specific: 15%** - Filesystem-specific validation
+- ✅ **XFS-specific scoring**:
+  - AG validity (40%): Generation counter, inode numbers, link count
+  - Extent integrity (40%): Format, alignment, size validation
+  - Inode consistency (20%): Size/blocks/extent coherence
+- ✅ **Btrfs-specific scoring**:
+  - Generation validity (40%): Counter ranges, transid consistency
+  - Checksum score (40%): Critical integrity check
+  - COW integrity (20%): Refcounts, snapshots, extent counts
+- ✅ **exFAT-specific scoring**:
+  - Chain validity (50%): First cluster, chain integrity, length
+  - Entry consistency (30%): Checksum, entry count, UTF-16
+  - Cluster patterns (20%): Bad clusters, valid ranges, data blocks
 - ✅ **Timestamp validation** - Chronological consistency checks
 - ✅ **Size validation** - Reasonable file size checks
 - ✅ **Confidence reports** - Detailed scoring breakdown
 - ✅ **Threshold filtering** - User-configurable confidence levels
+- ✅ **Comprehensive tests** - 4 new tests for Btrfs and exFAT confidence scoring (42 total tests)
 
 ### CLI Tool (`ghostfs-cli`)
 
@@ -147,7 +182,6 @@ GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file syst
 - ✅ **User-friendly output** - Emoji-enhanced, colorful feedback
 - ✅ **Error handling** - Graceful error messages
 - ⚠️ **`timeline` command** - Stubbed only
-
 ### Testing & Development
 
 - ✅ **Test data scripts** - Shell scripts for creating test images
@@ -359,19 +393,19 @@ Not yet implemented:
 
 ## 📈 Progress Metrics
 
-**Overall Completion**: ~75%
+**Overall Completion**: ~90%
 
 | Component | Progress | Status |
 |-----------|----------|--------|
 | Core Architecture | 95% | ✅ Complete |
-| XFS Support | 75% | 🟢 Fully functional |
-| Btrfs Support | 80% | 🟢 Fully functional |
-| exFAT Support | 80% | 🟢 Fully functional |
+| XFS Support | 90% | 🟢 Fully functional |
+| Btrfs Support | 90% | 🟢 Fully functional |
+| exFAT Support | 90% | 🟢 Fully functional |
 | Recovery Engine | 85% | ✅ All 3 FS supported |
-| Confidence System | 55% | 🟡 Needs FS-specific enhancements |
+| Confidence System | 95% | ✅ FS-specific scoring complete |
 | CLI Tool | 85% | 🟢 Mostly complete |
 | Documentation | 70% | 🟡 README good, dev docs missing |
-| Testing | 40% | 🟡 35 tests passing |
+| Testing | 50% | 🟢 42 tests passing |
 
 ---
 

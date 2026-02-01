@@ -14,7 +14,7 @@ pub struct FileSignature {
 /// Initialize the comprehensive file signature database
 pub fn init_signature_database() -> HashMap<String, Vec<FileSignature>> {
     let mut signatures = HashMap::new();
-    
+
     // Image formats
     let mut image_sigs = Vec::new();
     image_sigs.push(FileSignature {
@@ -53,7 +53,7 @@ pub fn init_signature_database() -> HashMap<String, Vec<FileSignature>> {
         description: "Windows Bitmap".to_string(),
     });
     signatures.insert("image".to_string(), image_sigs);
-    
+
     // Video formats
     let mut video_sigs = Vec::new();
     video_sigs.push(FileSignature {
@@ -78,7 +78,7 @@ pub fn init_signature_database() -> HashMap<String, Vec<FileSignature>> {
         description: "WebM/Matroska Video".to_string(),
     });
     signatures.insert("video".to_string(), video_sigs);
-    
+
     // Audio formats
     let mut audio_sigs = Vec::new();
     audio_sigs.push(FileSignature {
@@ -110,7 +110,7 @@ pub fn init_signature_database() -> HashMap<String, Vec<FileSignature>> {
         description: "Ogg Audio".to_string(),
     });
     signatures.insert("audio".to_string(), audio_sigs);
-    
+
     // Document formats
     let mut document_sigs = Vec::new();
     document_sigs.push(FileSignature {
@@ -123,7 +123,8 @@ pub fn init_signature_database() -> HashMap<String, Vec<FileSignature>> {
     document_sigs.push(FileSignature {
         signature: vec![0x50, 0x4B, 0x03, 0x04], // PK (ZIP-based)
         offset: 0,
-        mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document".to_string(),
+        mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            .to_string(),
         extensions: vec!["docx".to_string(), "xlsx".to_string(), "pptx".to_string()],
         description: "Microsoft Office Document".to_string(),
     });
@@ -135,7 +136,7 @@ pub fn init_signature_database() -> HashMap<String, Vec<FileSignature>> {
         description: "Microsoft Office Legacy Document".to_string(),
     });
     signatures.insert("document".to_string(), document_sigs);
-    
+
     // Archive formats
     let mut archive_sigs = Vec::new();
     archive_sigs.push(FileSignature {
@@ -167,7 +168,7 @@ pub fn init_signature_database() -> HashMap<String, Vec<FileSignature>> {
         description: "GZIP Archive".to_string(),
     });
     signatures.insert("archive".to_string(), archive_sigs);
-    
+
     // Executable formats
     let mut executable_sigs = Vec::new();
     executable_sigs.push(FileSignature {
@@ -199,7 +200,7 @@ pub fn init_signature_database() -> HashMap<String, Vec<FileSignature>> {
         description: "macOS Executable (64-bit)".to_string(),
     });
     signatures.insert("executable".to_string(), executable_sigs);
-    
+
     signatures
 }
 
@@ -207,14 +208,15 @@ pub fn init_signature_database() -> HashMap<String, Vec<FileSignature>> {
 pub fn analyze_file_signature(data: &[u8], max_bytes: usize) -> SignatureAnalysisResult {
     let signatures = init_signature_database();
     let analysis_data = &data[..std::cmp::min(data.len(), max_bytes)];
-    
+
     let mut matches = Vec::new();
-    
+
     // Check all signature categories
     for (category, category_sigs) in &signatures {
         for signature in category_sigs {
             if signature.offset + signature.signature.len() <= analysis_data.len() {
-                let slice = &analysis_data[signature.offset..signature.offset + signature.signature.len()];
+                let slice =
+                    &analysis_data[signature.offset..signature.offset + signature.signature.len()];
                 if slice == signature.signature {
                     matches.push(SignatureMatch {
                         category: category.clone(),
@@ -225,10 +227,10 @@ pub fn analyze_file_signature(data: &[u8], max_bytes: usize) -> SignatureAnalysi
             }
         }
     }
-    
+
     // Sort by confidence
     matches.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
-    
+
     SignatureAnalysisResult {
         matches,
         analyzed_bytes: analysis_data.len(),
@@ -255,18 +257,18 @@ pub struct SignatureAnalysisResult {
 /// Calculate confidence for a signature match
 fn calculate_signature_confidence(signature: &FileSignature, data: &[u8]) -> f32 {
     let mut confidence = 0.8; // Base confidence for signature match
-    
+
     // Longer signatures are more reliable
     confidence += (signature.signature.len() as f32 / 20.0).min(0.2);
-    
+
     // Signatures at offset 0 are more reliable
     if signature.offset == 0 {
         confidence += 0.1;
     }
-    
+
     // Check for additional validation patterns
     confidence += validate_additional_patterns(signature, data);
-    
+
     confidence.min(1.0)
 }
 
@@ -285,55 +287,56 @@ fn validate_jpeg_structure(data: &[u8]) -> f32 {
     if data.len() < 10 {
         return 0.0;
     }
-    
+
     let mut confidence = 0.0;
-    
+
     // Look for JFIF or EXIF markers
     for i in 0..data.len().saturating_sub(4) {
-        if &data[i..i+4] == b"JFIF" {
+        if &data[i..i + 4] == b"JFIF" {
             confidence += 0.15;
             break;
         }
-        if &data[i..i+4] == b"Exif" {
+        if &data[i..i + 4] == b"Exif" {
             confidence += 0.1;
             break;
         }
     }
-    
+
     // Look for End of Image marker
     for i in 0..data.len().saturating_sub(2) {
-        if data[i] == 0xFF && data[i+1] == 0xD9 {
+        if data[i] == 0xFF && data[i + 1] == 0xD9 {
             confidence += 0.1;
             break;
         }
     }
-    
+
     confidence
 }
 
 fn validate_png_structure(data: &[u8]) -> f32 {
-    if data.len() < 33 { // PNG header + IHDR chunk minimum
+    if data.len() < 33 {
+        // PNG header + IHDR chunk minimum
         return 0.0;
     }
-    
+
     let mut confidence = 0.0;
-    
+
     // Check for IHDR chunk at position 12
     if data.len() >= 16 && &data[12..16] == b"IHDR" {
         confidence += 0.15;
     }
-    
+
     // Look for other common PNG chunks
     let chunks = [b"IDAT", b"IEND", b"tEXt", b"gAMA"];
     for chunk in &chunks {
         for i in 0..data.len().saturating_sub(4) {
-            if &data[i..i+4] == *chunk {
+            if &data[i..i + 4] == *chunk {
                 confidence += 0.05;
                 break;
             }
         }
     }
-    
+
     confidence
 }
 
@@ -341,10 +344,10 @@ fn validate_pdf_structure(data: &[u8]) -> f32 {
     if data.len() < 100 {
         return 0.0;
     }
-    
+
     let mut confidence = 0.0;
     let data_str = String::from_utf8_lossy(&data[..std::cmp::min(data.len(), 1000)]);
-    
+
     // Look for PDF structure elements
     if data_str.contains("trailer") {
         confidence += 0.1;
@@ -358,7 +361,7 @@ fn validate_pdf_structure(data: &[u8]) -> f32 {
     if data_str.contains("endobj") {
         confidence += 0.05;
     }
-    
+
     confidence
 }
 
@@ -366,20 +369,20 @@ fn validate_mp4_structure(data: &[u8]) -> f32 {
     if data.len() < 32 {
         return 0.0;
     }
-    
+
     let mut confidence = 0.0;
-    
+
     // Look for common MP4 atoms
     let atoms = [b"moov", b"mdat", b"ftyp", b"mdhd", b"trak"];
     for atom in &atoms {
         for i in 0..data.len().saturating_sub(4) {
-            if &data[i..i+4] == *atom {
+            if &data[i..i + 4] == *atom {
                 confidence += 0.04;
                 break;
             }
         }
     }
-    
+
     confidence
 }
 
@@ -388,20 +391,21 @@ fn is_likely_text_file(data: &[u8]) -> bool {
     if data.is_empty() {
         return false;
     }
-    
+
     let sample_size = std::cmp::min(data.len(), 1024);
     let sample = &data[..sample_size];
-    
+
     // Count printable characters
-    let printable_count = sample.iter()
-        .filter(|&&b| (b >= 32 && b <= 126) || b == 9 || b == 10 || b == 13)
+    let printable_count = sample
+        .iter()
+        .filter(|&&b| (32..=126).contains(&b) || b == 9 || b == 10 || b == 13)
         .count();
-    
+
     let printable_ratio = printable_count as f32 / sample.len() as f32;
-    
+
     // Check for UTF-8 BOM
-    let has_utf8_bom = sample.len() >= 3 && &sample[..3] == [0xEF, 0xBB, 0xBF];
-    
+    let has_utf8_bom = sample.len() >= 3 && sample[..3] == [0xEF, 0xBB, 0xBF];
+
     printable_ratio > 0.9 || has_utf8_bom
 }
 
@@ -410,22 +414,22 @@ fn calculate_entropy(data: &[u8]) -> f32 {
     if data.is_empty() {
         return 0.0;
     }
-    
+
     let mut frequencies = [0u32; 256];
     for &byte in data {
         frequencies[byte as usize] += 1;
     }
-    
+
     let len = data.len() as f32;
     let mut entropy = 0.0;
-    
+
     for &freq in &frequencies {
         if freq > 0 {
             let p = freq as f32 / len;
             entropy -= p * p.log2();
         }
     }
-    
+
     entropy
 }
 
@@ -451,40 +455,42 @@ pub struct ContentMetadata {
 
 fn extract_jpeg_metadata(data: &[u8]) -> ContentMetadata {
     let mut metadata = ContentMetadata::default();
-    
+
     // Look for APP0 segment (JFIF)
     for i in 0..data.len().saturating_sub(16) {
-        if data[i] == 0xFF && data[i+1] == 0xE0 && &data[i+4..i+8] == b"JFIF" {
+        if data[i] == 0xFF && data[i + 1] == 0xE0 && &data[i + 4..i + 8] == b"JFIF" {
             // Extract JFIF version and other info
             if data.len() > i + 14 {
                 metadata.additional_info.insert(
                     "jfif_version".to_string(),
-                    format!("{}.{}", data[i+9], data[i+10])
+                    format!("{}.{}", data[i + 9], data[i + 10]),
                 );
             }
             break;
         }
     }
-    
+
     metadata
 }
 
 fn extract_png_metadata(data: &[u8]) -> ContentMetadata {
     let mut metadata = ContentMetadata::default();
-    
+
     // Parse IHDR chunk for dimensions and color info
     if data.len() >= 25 && &data[12..16] == b"IHDR" {
         let width = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
         let height = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
         let bit_depth = data[24];
         let color_type = data[25];
-        
+
         metadata.width = Some(width);
         metadata.height = Some(height);
         metadata.color_depth = Some(bit_depth);
-        metadata.additional_info.insert("color_type".to_string(), color_type.to_string());
+        metadata
+            .additional_info
+            .insert("color_type".to_string(), color_type.to_string());
     }
-    
+
     metadata
 }
 
@@ -501,7 +507,7 @@ mod tests {
     fn test_jpeg_signature_detection() {
         let jpeg_header = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F'];
         let result = analyze_file_signature(&jpeg_header, 1024);
-        
+
         assert!(!result.matches.is_empty());
         assert_eq!(result.matches[0].signature.mime_type, "image/jpeg");
         assert!(result.matches[0].confidence > 0.8);
@@ -511,7 +517,7 @@ mod tests {
     fn test_png_signature_detection() {
         let png_header = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         let result = analyze_file_signature(&png_header, 1024);
-        
+
         assert!(!result.matches.is_empty());
         assert_eq!(result.matches[0].signature.mime_type, "image/png");
     }
@@ -520,7 +526,7 @@ mod tests {
     fn test_text_file_detection() {
         let text_content = b"Hello, this is a text file with normal characters.";
         assert!(is_likely_text_file(text_content));
-        
+
         let binary_content = vec![0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD];
         assert!(!is_likely_text_file(&binary_content));
     }
@@ -531,7 +537,7 @@ mod tests {
         let uniform = (0..=255u8).collect::<Vec<_>>();
         let entropy = calculate_entropy(&uniform);
         assert!(entropy > 7.5); // Close to 8.0 for uniform distribution
-        
+
         // All same bytes should have zero entropy
         let same_bytes = vec![0x42; 1000];
         let entropy = calculate_entropy(&same_bytes);

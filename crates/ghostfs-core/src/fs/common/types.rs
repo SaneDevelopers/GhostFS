@@ -16,11 +16,8 @@ impl BlockDevice {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let file = File::open(path.as_ref())?;
         let size = file.metadata()?.len();
-        
-        let mmap = unsafe {
-            MmapOptions::new()
-                .map(&file)?
-        };
+
+        let mmap = unsafe { MmapOptions::new().map(&file)? };
 
         Ok(BlockDevice {
             _file: file,
@@ -38,11 +35,11 @@ impl BlockDevice {
     pub fn read_bytes(&self, offset: u64, length: usize) -> Result<&[u8]> {
         let start = offset as usize;
         let end = start + length;
-        
+
         if end > self.mmap.len() {
             anyhow::bail!("Read beyond end of device: {} > {}", end, self.mmap.len());
         }
-        
+
         Ok(&self.mmap[start..end])
     }
 
@@ -63,7 +60,7 @@ impl BlockDevice {
         let offset = block_number * block_size as u64;
         self.read_bytes(offset, block_size as usize)
     }
-    
+
     /// Create a test BlockDevice from in-memory data (for testing only)
     #[cfg(test)]
     pub fn from_vec(data: Vec<u8>) -> Self {
@@ -72,14 +69,14 @@ impl BlockDevice {
         let mut file = temp_file.as_file();
         file.write_all(&data).expect("Failed to write test data");
         file.sync_all().expect("Failed to sync");
-        
+
         let size = data.len() as u64;
         let mmap = unsafe {
             MmapOptions::new()
                 .map(file)
                 .expect("Failed to mmap test data")
         };
-        
+
         BlockDevice {
             _file: temp_file.into_file(),
             mmap,
@@ -133,11 +130,17 @@ impl MagicDetector {
             [0x50, 0x4B, 0x07, 0x08] => Some("application/zip"),
             // Executables
             [0x7F, 0x45, 0x4C, 0x46] => Some("application/x-executable"), // ELF
-            [0x4D, 0x5A, ..] => Some("application/x-executable"),        // PE/COFF
+            [0x4D, 0x5A, ..] => Some("application/x-executable"),         // PE/COFF
             // Media
-            [0x00, 0x00, 0x00, 0x18] if data.len() >= 8 && &data[4..8] == b"ftyp" => Some("video/mp4"),
-            [0x00, 0x00, 0x00, 0x1C] if data.len() >= 8 && &data[4..8] == b"ftyp" => Some("video/mp4"),
-            [0x00, 0x00, 0x00, 0x20] if data.len() >= 8 && &data[4..8] == b"ftyp" => Some("video/mp4"),
+            [0x00, 0x00, 0x00, 0x18] if data.len() >= 8 && &data[4..8] == b"ftyp" => {
+                Some("video/mp4")
+            }
+            [0x00, 0x00, 0x00, 0x1C] if data.len() >= 8 && &data[4..8] == b"ftyp" => {
+                Some("video/mp4")
+            }
+            [0x00, 0x00, 0x00, 0x20] if data.len() >= 8 && &data[4..8] == b"ftyp" => {
+                Some("video/mp4")
+            }
             _ => None,
         }
     }
@@ -149,11 +152,12 @@ impl MagicDetector {
         }
 
         // Simple heuristic: check if most bytes are printable ASCII or common UTF-8
-        let printable_count = data.iter()
+        let printable_count = data
+            .iter()
             .take(1024) // Only check first 1KB
             .filter(|&&b| {
                 // Printable ASCII + tab, newline, carriage return
-                (b >= 0x20 && b <= 0x7E) || b == 0x09 || b == 0x0A || b == 0x0D
+                (0x20..=0x7E).contains(&b) || b == 0x09 || b == 0x0A || b == 0x0D
             })
             .count();
 
@@ -170,15 +174,24 @@ mod tests {
     fn test_magic_detection() {
         // JPEG (needs 8 bytes minimum)
         let jpeg_header = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46];
-        assert_eq!(MagicDetector::detect_file_type(&jpeg_header), Some("image/jpeg"));
+        assert_eq!(
+            MagicDetector::detect_file_type(&jpeg_header),
+            Some("image/jpeg")
+        );
 
         // PNG
         let png_header = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-        assert_eq!(MagicDetector::detect_file_type(&png_header), Some("image/png"));
+        assert_eq!(
+            MagicDetector::detect_file_type(&png_header),
+            Some("image/png")
+        );
 
         // PDF (needs 8 bytes minimum)
         let pdf_header = [0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34];
-        assert_eq!(MagicDetector::detect_file_type(&pdf_header), Some("application/pdf"));
+        assert_eq!(
+            MagicDetector::detect_file_type(&pdf_header),
+            Some("application/pdf")
+        );
     }
 
     #[test]

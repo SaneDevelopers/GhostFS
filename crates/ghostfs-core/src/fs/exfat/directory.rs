@@ -133,20 +133,22 @@ impl DirectoryEntry {
         if data.len() < ENTRY_SIZE {
             anyhow::bail!("Insufficient data for directory entry");
         }
-        
+
         let entry_type = data[0];
-        
+
         // Check if entry is in-use (high bit set) or deleted
         let in_use = entry_type & 0x80 != 0;
         let _type_code = entry_type & 0x7F;
-        
+
         match entry_type {
             // In-use entries
             ENTRY_TYPE_FILE => Ok(DirectoryEntry::File(FileEntry::parse(data, false)?)),
-            ENTRY_TYPE_STREAM => Ok(DirectoryEntry::StreamExtension(StreamExtensionEntry::parse(data, false)?)),
+            ENTRY_TYPE_STREAM => Ok(DirectoryEntry::StreamExtension(
+                StreamExtensionEntry::parse(data, false)?,
+            )),
             ENTRY_TYPE_FILENAME => Ok(DirectoryEntry::FileName(FileNameEntry::parse(data, false)?)),
             ENTRY_TYPE_BITMAP => Ok(DirectoryEntry::Bitmap(BitmapEntry::parse(data)?)),
-            
+
             // Deleted entries (recoverable!)
             ENTRY_TYPE_FILE_DELETED => Ok(DirectoryEntry::Deleted(DeletedEntry {
                 original_type: entry_type,
@@ -160,7 +162,7 @@ impl DirectoryEntry {
                 original_type: entry_type,
                 raw_data: data[..ENTRY_SIZE].to_vec(),
             })),
-            
+
             // Unused entry (0x00) or unknown
             0x00 => Ok(DirectoryEntry::Unknown(0x00)),
             _ => {
@@ -177,7 +179,7 @@ impl DirectoryEntry {
             }
         }
     }
-    
+
     /// Check if this is a deleted entry
     pub fn is_deleted(&self) -> bool {
         match self {
@@ -194,7 +196,7 @@ impl FileEntry {
     /// Parse file entry from raw bytes
     pub fn parse(data: &[u8], is_deleted: bool) -> Result<Self> {
         let mut cursor = Cursor::new(data);
-        
+
         let entry_type = cursor.read_u8()?;
         let secondary_count = cursor.read_u8()?;
         let set_checksum = cursor.read_u16::<LittleEndian>()?;
@@ -203,7 +205,7 @@ impl FileEntry {
         let create_timestamp = cursor.read_u32::<LittleEndian>()?;
         let modify_timestamp = cursor.read_u32::<LittleEndian>()?;
         let access_timestamp = cursor.read_u32::<LittleEndian>()?;
-        
+
         Ok(FileEntry {
             entry_type,
             secondary_count,
@@ -215,7 +217,7 @@ impl FileEntry {
             is_deleted,
         })
     }
-    
+
     /// Check if this is a directory
     pub fn is_directory(&self) -> bool {
         self.file_attributes & ATTR_DIRECTORY != 0
@@ -226,7 +228,7 @@ impl StreamExtensionEntry {
     /// Parse stream extension entry from raw bytes
     pub fn parse(data: &[u8], is_deleted: bool) -> Result<Self> {
         let mut cursor = Cursor::new(data);
-        
+
         let entry_type = cursor.read_u8()?;
         let general_flags = cursor.read_u8()?;
         let _reserved = cursor.read_u8()?;
@@ -237,7 +239,7 @@ impl StreamExtensionEntry {
         let _reserved3 = cursor.read_u32::<LittleEndian>()?;
         let first_cluster = cursor.read_u32::<LittleEndian>()?;
         let data_length = cursor.read_u64::<LittleEndian>()?;
-        
+
         Ok(StreamExtensionEntry {
             entry_type,
             general_flags,
@@ -249,7 +251,7 @@ impl StreamExtensionEntry {
             is_deleted,
         })
     }
-    
+
     /// Check if file uses contiguous allocation (NoFatChain)
     pub fn is_contiguous(&self) -> bool {
         self.general_flags & 0x02 != 0
@@ -261,11 +263,11 @@ impl FileNameEntry {
     pub fn parse(data: &[u8], is_deleted: bool) -> Result<Self> {
         let entry_type = data[0];
         let flags = data[1];
-        
+
         // File name is 15 UTF-16 characters starting at offset 2
         let utf16_data = &data[2..32];
         let file_name = decode_utf16_name(utf16_data)?;
-        
+
         Ok(FileNameEntry {
             entry_type,
             flags,
@@ -279,14 +281,14 @@ impl BitmapEntry {
     /// Parse allocation bitmap entry
     pub fn parse(data: &[u8]) -> Result<Self> {
         let mut cursor = Cursor::new(data);
-        
+
         let _entry_type = cursor.read_u8()?;
         let flags = cursor.read_u8()?;
         let _reserved = [0u8; 18];
         cursor.set_position(20);
         let first_cluster = cursor.read_u32::<LittleEndian>()?;
         let data_length = cursor.read_u64::<LittleEndian>()?;
-        
+
         Ok(BitmapEntry {
             flags,
             first_cluster,
@@ -307,7 +309,7 @@ impl DeletedEntry {
             None
         }
     }
-    
+
     /// Try to recover stream extension from deleted entry
     pub fn recover_as_stream(&self) -> Option<StreamExtensionEntry> {
         if self.original_type == ENTRY_TYPE_STREAM_DELETED {
@@ -318,7 +320,7 @@ impl DeletedEntry {
             None
         }
     }
-    
+
     /// Try to recover filename from deleted entry
     pub fn recover_as_filename(&self) -> Option<FileNameEntry> {
         if self.original_type == ENTRY_TYPE_FILENAME_DELETED {
@@ -338,9 +340,8 @@ fn decode_utf16_name(data: &[u8]) -> Result<String> {
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .take_while(|&c| c != 0)
         .collect();
-    
-    String::from_utf16(&utf16_chars)
-        .map_err(|e| anyhow::anyhow!("Invalid UTF-16 filename: {}", e))
+
+    String::from_utf16(&utf16_chars).map_err(|e| anyhow::anyhow!("Invalid UTF-16 filename: {}", e))
 }
 
 /// A complete file entry set (File + StreamExtension + FileNames)
@@ -362,26 +363,26 @@ impl FileEntrySet {
         if entries.is_empty() {
             return None;
         }
-        
+
         // First entry must be File entry
         let file_entry = match &entries[0] {
             DirectoryEntry::File(f) => f.clone(),
             DirectoryEntry::Deleted(d) => d.recover_as_file()?,
             _ => return None,
         };
-        
+
         let expected_count = file_entry.secondary_count as usize;
         if entries.len() < expected_count + 1 {
             return None;
         }
-        
+
         // Second entry must be StreamExtension
         let stream_extension = match &entries[1] {
             DirectoryEntry::StreamExtension(s) => s.clone(),
             DirectoryEntry::Deleted(d) => d.recover_as_stream()?,
             _ => return None,
         };
-        
+
         // Remaining entries are FileName entries
         let mut filename = String::new();
         for entry in entries.iter().skip(2).take(expected_count - 1) {
@@ -395,15 +396,15 @@ impl FileEntrySet {
                 _ => {}
             }
         }
-        
+
         // Trim filename to actual length
         let name_length = stream_extension.name_length as usize;
         if filename.chars().count() > name_length {
             filename = filename.chars().take(name_length).collect();
         }
-        
+
         let is_deleted = file_entry.is_deleted || stream_extension.is_deleted;
-        
+
         Some(FileEntrySet {
             file_entry,
             stream_extension,
@@ -416,13 +417,13 @@ impl FileEntrySet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_entry_type_detection() {
         assert_eq!(ENTRY_TYPE_FILE & 0x80, 0x80); // High bit set
         assert_eq!(ENTRY_TYPE_FILE_DELETED & 0x80, 0x00); // High bit clear
     }
-    
+
     #[test]
     fn test_utf16_decode() {
         // "test" in UTF-16LE
@@ -430,7 +431,7 @@ mod tests {
         let name = decode_utf16_name(&data).unwrap();
         assert_eq!(name, "test");
     }
-    
+
     #[test]
     fn test_file_attributes() {
         let entry = FileEntry {
@@ -443,7 +444,7 @@ mod tests {
             access_timestamp: 0,
             is_deleted: false,
         };
-        
+
         assert!(entry.is_directory());
     }
 }

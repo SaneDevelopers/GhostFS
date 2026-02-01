@@ -201,16 +201,16 @@ fn main() -> Result<()> {
 			// Perform scan (no threshold - software auto-calculates confidence)
 			let session = ghostfs_core::scan_and_analyze_with_config(&image, fs_type, xfs_config)?;
 			
-			println!("✅ Scan completed successfully!");
-			println!("📊 Session ID: {}", session.id);
-			println!("📁 File System: {}", session.fs_type);
-			println!("💾 Device Size: {} MB", session.metadata.device_size / (1024 * 1024));
-			println!("📈 Files Found: {}", session.metadata.files_found);
-			println!("🔄 Recoverable Files: {} (confidence >= 40%)", session.metadata.recoverable_files);
+			println!("Scan completed successfully!");
+			println!("Session ID: {}", session.id);
+			println!("File System: {}", session.fs_type);
+			println!("Device Size: {} MB", session.metadata.device_size / (1024 * 1024));
+			println!("Files Found: {}", session.metadata.files_found);
+			println!("Recoverable Files: {} (confidence >= 40%)", session.metadata.recoverable_files);
 			
 			// Show detailed file list with auto-calculated confidence
 			if !session.scan_results.is_empty() {
-				println!("\n📋 Found Files:");
+				println!("\nFound Files:");
 				println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 				for file in &session.scan_results {
 					let path_str = file.original_path
@@ -235,11 +235,11 @@ fn main() -> Result<()> {
 			}
 		}
 		Commands::Detect { image } => {
-			println!("🔍 Detecting file system type for: {}", image.display());
+			println!("Detecting file system type for: {}", image.display());
 			
 			match ghostfs_core::fs::detect_filesystem(&image)? {
 				Some(fs_type) => {
-					println!("✅ Detected: {}", fs_type);
+					println!("Detected: {}", fs_type);
 					
 					// Show basic info
 					if let Ok(info) = ghostfs_core::fs::get_filesystem_info(&image, fs_type) {
@@ -248,13 +248,13 @@ fn main() -> Result<()> {
 					}
 				}
 				None => {
-					println!("❌ Unknown or unsupported file system");
+					println!("Unknown or unsupported file system");
 				}
 			}
 		}
 		Commands::Recover { image, fs, out, ids, no_interactive } => {
-			println!("🔄 Starting recovery process for: {}", image.display());
-			println!("📁 Output directory: {}", out.display());
+			println!("Starting recovery process for: {}", image.display());
+			println!("Output directory: {}", out.display());
 			
 			// Parse filesystem type
 			let fs_type = match fs.as_str() {
@@ -262,7 +262,7 @@ fn main() -> Result<()> {
 				"btrfs" => ghostfs_core::FileSystemType::Btrfs,
 				"exfat" => ghostfs_core::FileSystemType::ExFat,
 				_ => {
-					eprintln!("❌ Unsupported filesystem type: {}", fs);
+					eprintln!("Unsupported filesystem type: {}", fs);
 					std::process::exit(1);
 				}
 			};
@@ -278,22 +278,22 @@ fn main() -> Result<()> {
 				None
 			};
 
-			// First perform scan to identify recoverable files (auto-confidence)
-			println!("🔍 Scanning for recoverable files...");
+			// Perform scan to identify recoverable files (auto-confidence)
+			println!("Scanning for recoverable files...");
 			let session = ghostfs_core::scan_and_analyze_with_config(&image, fs_type, xfs_config)?;
 			
 			if session.metadata.recoverable_files == 0 {
-				println!("❌ No recoverable files found (confidence >= 40%)");
+				println!("No recoverable files found (confidence >= 40%)");
 				return Ok(());
 			}
 
-			println!("✅ Found {} recoverable files", session.metadata.recoverable_files);
+			println!("Found {} recoverable files", session.metadata.recoverable_files);
 			
 			// Perform recovery
-			println!("🚀 Starting file recovery...");
+			println!("Starting file recovery...");
 			let recovery_report = match ids {
 				Some(file_ids) => {
-					println!("📝 Recovering specific files: {:?}", file_ids);
+					println!("Recovering specific files: {:?}", file_ids);
 					// Convert String IDs to u64 IDs
 					let file_ids_u64: Vec<u64> = file_ids.iter()
 						.filter_map(|id| id.parse().ok())
@@ -301,38 +301,38 @@ fn main() -> Result<()> {
 					ghostfs_core::recover_files(&image, &session, &out, Some(file_ids_u64))?
 				}
 				None => {
-					println!("📁 Recovering all recoverable files...");
+					println!("Recovering all recoverable files...");
 					ghostfs_core::recover_files(&image, &session, &out, None)?
 				}
 			};
 
 			// Display recovery results
-			println!("\n📊 Recovery Report:");
-			println!("✅ Successfully recovered: {}", recovery_report.recovered_files);
-			println!("❌ Failed recoveries: {}", recovery_report.failed_files);
-			println!("📁 Total files processed: {}", recovery_report.total_files);
+			println!("\nRecovery Report:");
+			println!("Successfully recovered: {}", recovery_report.recovered_files);
+			println!("Failed recoveries: {}", recovery_report.failed_files);
+			println!("Total files processed: {}", recovery_report.total_files);
 
 			if !recovery_report.recovery_details.is_empty() {
-				println!("\n📋 Detailed Results:");
+				println!("\nDetailed Results:");
 				for result in &recovery_report.recovery_details {
 					match &result.status {
 						ghostfs_core::RecoveryStatus::Success => {
-							println!("  ✅ {} -> {}", result.file_id, result.recovered_path.display());
+							println!("  {} -> {}", result.file_id, result.recovered_path.display());
 						}
 						ghostfs_core::RecoveryStatus::Failed(error) => {
-							println!("  ❌ {} -> Failed: {}", result.file_id, error);
+							println!("  {} -> Failed: {}", result.file_id, error);
 						}
 					}
 				}
 			}
 
 			if recovery_report.recovered_files > 0 {
-				println!("\n🎉 Recovery completed! Files saved to: {}", out.display());
+				println!("Recovery completed! Files saved to: {}", out.display());
 			}
 		}
 		Commands::Timeline => {
-			println!("📅 Timeline analysis");
-			println!("⚠️  Timeline functionality not yet implemented");
+			println!("Timeline analysis");
+			println!("Timeline functionality not yet implemented");
 		}
 	}
 	Ok(())

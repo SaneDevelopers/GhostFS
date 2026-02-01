@@ -3,6 +3,9 @@ use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Cursor;
 
+pub mod tree;
+pub mod recovery;
+
 use super::common::BlockDevice;
 
 /// Btrfs magic number
@@ -151,26 +154,24 @@ pub fn get_filesystem_info(device: &BlockDevice) -> Result<String> {
     ))
 }
 
-/// Scan for deleted files in Btrfs (placeholder implementation)
+/// Scan for deleted files in Btrfs
 pub fn scan_for_deleted_files(device: &BlockDevice) -> Result<Vec<crate::DeletedFile>> {
-    let _superblock = {
-        let sb_data = device.read_bytes(65536, 4096)?;
-        BtrfsSuperblock::parse(sb_data)?
-    };
+    // Parse superblock
+    let sb_data = device.read_bytes(65536, 4096)?;
+    let superblock = BtrfsSuperblock::parse(sb_data)?;
     
-    tracing::info!("Btrfs scan: Starting tree analysis...");
+    tracing::info!("Btrfs scan: Starting tree analysis");
+    tracing::info!("  Generation: {}", superblock.generation);
+    tracing::info!("  Root tree: 0x{:x}", superblock.root);
+    tracing::info!("  Node size: {} bytes", superblock.nodesize);
     
-    // TODO: Implement actual Btrfs scanning:
-    // 1. Parse tree roots (extent tree, chunk tree, device tree)
-    // 2. Enumerate snapshots and subvolumes
-    // 3. Scan for deleted inodes in tree structures
-    // 4. Leverage COW semantics for historical recovery
-    // 5. Handle compression (LZ4, ZLIB, ZSTD)
+    // Create and use the recovery engine
+    let recovery_engine = recovery::BtrfsRecoveryEngine::new(device, superblock)?;
+    let deleted_files = recovery_engine.scan_deleted_files()?;
     
-    tracing::info!("Btrfs scan: Analysis complete (placeholder)");
+    tracing::info!("Btrfs scan complete: {} files found", deleted_files.len());
     
-    // Return empty results for now
-    Ok(Vec::new())
+    Ok(deleted_files)
 }
 
 #[cfg(test)]

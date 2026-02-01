@@ -137,8 +137,8 @@ impl XfsRecoveryEngine {
         // Parse the XFS superblock
         match engine.parse_superblock() {
             Ok(sb) => {
-                tracing::info!("✅ XFS superblock parsed successfully");
-                tracing::info!("📊 Filesystem details: {} AGs, {} blocks each, block size: {}", 
+                tracing::info!(" XFS superblock parsed successfully");
+                tracing::info!(" Filesystem details: {} AGs, {} blocks each, block size: {}", 
                     sb.ag_count, sb.ag_blocks, sb.block_size);
                 
                 engine.ag_count = sb.ag_count;
@@ -153,8 +153,8 @@ impl XfsRecoveryEngine {
                 engine.calculate_ag_inode_tables()?;
             }
             Err(e) => {
-                tracing::warn!("⚠️ Failed to parse XFS superblock: {}", e);
-                tracing::info!("🔧 Using default XFS parameters for recovery");
+                tracing::warn!("Failed to parse XFS superblock: {}", e);
+                tracing::info!("Using default XFS parameters for recovery");
                 
                 // Use defaults but still try to scan
                 engine.calculate_ag_inode_tables()?;
@@ -167,7 +167,7 @@ impl XfsRecoveryEngine {
 
     /// Parse XFS superblock from sector 0
     fn parse_superblock(&self) -> Result<XfsSuperblock> {
-        tracing::debug!("📖 Reading XFS superblock from sector 0");
+        tracing::debug!("Reading XFS superblock from sector 0");
         let data = self.device.read_sector(0)?;
         
         if data.len() < 264 {
@@ -231,7 +231,7 @@ impl XfsRecoveryEngine {
             512 // Standard sector size
         };
 
-        tracing::debug!("📋 Parsed superblock: {} data blocks, {} AGs of {} blocks each", 
+        tracing::debug!("Parsed superblock: {} data blocks, {} AGs of {} blocks each", 
             data_blocks, ag_count, ag_blocks);
 
         Ok(XfsSuperblock {
@@ -272,7 +272,7 @@ impl XfsRecoveryEngine {
 
     /// Calculate inode table locations for each allocation group
     fn calculate_ag_inode_tables(&mut self) -> Result<()> {
-        tracing::debug!("🧮 Calculating inode table locations for {} AGs", self.ag_count);
+        tracing::debug!("Calculating inode table locations for {} AGs", self.ag_count);
         
         self.ag_inode_table_blocks.clear();
         
@@ -285,7 +285,7 @@ impl XfsRecoveryEngine {
             let inode_table_start = ag_start_block + inode_table_offset;
             
             self.ag_inode_table_blocks.push(inode_table_start);
-            tracing::debug!("📍 AG {} inode table starts at block {}", ag_no, inode_table_start);
+            tracing::debug!("AG {} inode table starts at block {}", ag_no, inode_table_start);
         }
         
         Ok(())
@@ -293,39 +293,39 @@ impl XfsRecoveryEngine {
 
     /// Comprehensive scan for deleted files across all allocation groups
     pub fn scan_deleted_files(&self) -> Result<Vec<crate::DeletedFile>> {
-        tracing::info!("🔍 Starting comprehensive XFS deleted file scan");
+        tracing::info!("Starting comprehensive XFS deleted file scan");
         let mut deleted_files = Vec::new();
         let mut file_id_counter = 1u64;
 
         // Scan each allocation group for deleted inodes
         for (ag_no, &inode_table_start) in self.ag_inode_table_blocks.iter().enumerate() {
-            tracing::debug!("� Scanning AG {} inode table starting at block {}", ag_no, inode_table_start);
+            tracing::debug!("Scanning AG {} inode table starting at block {}", ag_no, inode_table_start);
             
             match self.scan_allocation_group_inodes(ag_no as u32, inode_table_start, &mut file_id_counter) {
                 Ok(mut ag_files) => {
-                    tracing::info!("📁 Found {} deleted files in AG {}", ag_files.len(), ag_no);
+                    tracing::info!("Found {} deleted files in AG {}", ag_files.len(), ag_no);
                     deleted_files.append(&mut ag_files);
                 }
                 Err(e) => {
-                    tracing::warn!("⚠️ Failed to scan AG {}: {}", ag_no, e);
+                    tracing::warn!("Failed to scan AG {}: {}", ag_no, e);
                     // Continue with other AGs
                 }
             }
         }
 
         // Additional signature-based scanning for files without readable inodes
-        tracing::info!("🔍 Performing signature-based scan for additional files");
+        tracing::info!("Performing signature-based scan for additional files");
         match self.signature_based_scan(&mut file_id_counter) {
             Ok(mut sig_files) => {
-                tracing::info!("📄 Found {} files via signature scanning", sig_files.len());
+                tracing::info!("Found {} files via signature scanning", sig_files.len());
                 deleted_files.append(&mut sig_files);
             }
             Err(e) => {
-                tracing::warn!("⚠️ Signature scan failed: {}", e);
+                tracing::warn!("Signature scan failed: {}", e);
             }
         }
 
-        tracing::info!("✅ XFS scan complete: {} total deleted files found", deleted_files.len());
+        tracing::info!("XFS scan complete: {} total deleted files found", deleted_files.len());
         Ok(deleted_files)
     }
 
@@ -350,7 +350,7 @@ impl XfsRecoveryEngine {
                     deleted_files.append(&mut block_files);
                 }
                 Err(e) => {
-                    tracing::debug!("⚠️ Failed to read inode block {}: {}", inode_block, e);
+                    tracing::debug!("Failed to read inode block {}: {}", inode_block, e);
                     // Continue with next block
                 }
             }
@@ -628,8 +628,6 @@ impl XfsRecoveryEngine {
         }
 
         // CHECK 9: Format consistency with file type
-
-        // CHECK 9: Format consistency with file type
         // Directories shouldn't use local format for large sizes
         if file_type == 0x4000 && format == XFS_DINODE_FMT_LOCAL && size > 256 {
             return false; // Directory too large for local format
@@ -745,20 +743,20 @@ impl XfsRecoveryEngine {
         let total_blocks = self.device.size() / self.block_size as u64;
         let scan_blocks = self.config.adaptive_scan_blocks(total_blocks);
         
-        tracing::info!("📊 Filesystem size: {} blocks ({:.2} GB)", 
+        tracing::info!("Filesystem size: {} blocks ({:.2} GB)", 
             total_blocks, 
             (total_blocks * self.block_size as u64) as f64 / (1024.0 * 1024.0 * 1024.0)
         );
         if total_blocks > 0 {
             tracing::info!(
-                "🔍 Adaptive scan: {} blocks ({:.1}%)",
+                "Adaptive scan: {} blocks ({:.1}%)",
                 scan_blocks,
                 (scan_blocks as f64 / total_blocks as f64) * 100.0
             );
         } else {
             // Avoid division by zero when the filesystem has zero blocks
             tracing::info!(
-                "🔍 Adaptive scan: {} blocks (0.0%) - total filesystem blocks is 0",
+                "Adaptive scan: {} blocks (0.0%) - total filesystem blocks is 0",
                 scan_blocks
             );
         }
@@ -955,7 +953,7 @@ impl XfsRecoveryEngine {
 
     /// Recover file data for a specific inode
     pub fn recover_file(&self, inode: u64) -> Result<Vec<u8>> {
-        tracing::info!("🔄 Recovering file data for inode {}", inode);
+        tracing::info!("Recovering file data for inode {}", inode);
         
         // First, try to find the inode in our scanned files
         let deleted_files = self.scan_deleted_files()?;
@@ -975,7 +973,7 @@ impl XfsRecoveryEngine {
                 recovered_data.extend_from_slice(b"[Local inode data - recovery not yet implemented]");
             } else {
                 // Read data from blocks
-                for block_offset in 0..block_range.block_count {
+                for block_offset in 0..block_range.block_count   {
                     let block_num = block_range.start_block + block_offset;
                     match self.device.read_block(block_num, self.block_size) {
                         Ok(block_data) => {
@@ -992,7 +990,7 @@ impl XfsRecoveryEngine {
                             }
                         }
                         Err(e) => {
-                            tracing::warn!("⚠️ Failed to read block {}: {}", block_num, e);
+                            tracing::warn!("Failed to read block {}: {}", block_num, e);
                         }
                     }
                 }
@@ -1004,7 +1002,7 @@ impl XfsRecoveryEngine {
             recovered_data.truncate(target_file.size as usize);
         }
 
-        tracing::info!("✅ Recovered {} bytes for inode {}", recovered_data.len(), inode);
+        tracing::info!("Recovered {} bytes for inode {}", recovered_data.len(), inode);
         Ok(recovered_data)
     }
 
@@ -1054,7 +1052,7 @@ impl XfsRecoveryEngine {
 
 /// Get comprehensive XFS file system information
 pub fn get_filesystem_info(device: &BlockDevice) -> Result<String> {
-    tracing::info!("🔍 Analyzing XFS filesystem information");
+    tracing::info!("Analyzing XFS filesystem information");
     
     // Read and parse superblock directly
     let data = device.read_sector(0)?;
@@ -1143,9 +1141,9 @@ pub fn is_xfs_superblock(data: &[u8]) -> bool {
     let is_xfs = magic == XFS_MAGIC;
     
     if is_xfs {
-        tracing::info!("✅ XFS filesystem detected");
+        tracing::info!("XFS filesystem detected");
     } else {
-        tracing::debug!("❌ Not an XFS filesystem (magic: 0x{:08x})", magic);
+        tracing::debug!("Not an XFS filesystem (magic: 0x{:08x})", magic);
     }
     
     is_xfs

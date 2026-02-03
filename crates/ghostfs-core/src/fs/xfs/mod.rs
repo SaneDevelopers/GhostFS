@@ -3,6 +3,10 @@ use super::common::BlockDevice;
 use std::collections::HashMap;
 use chrono::DateTime;
 
+// Import metadata recovery module
+mod metadata;
+use metadata::{XfsDirParser, XfsAttrParser, DirReconstructor};
+
 const XFS_MAGIC: u32 = 0x58465342; // "XFSB" in big-endian
 const XFS_INODE_MAGIC: u16 = 0x494E; // "IN" in big-endian
 const XFS_DINODE_FMT_EXTENTS: u8 = 1;
@@ -111,6 +115,9 @@ pub struct XfsRecoveryEngine {
     inodes_per_block: u16,
     ag_inode_table_blocks: Vec<u64>, // Starting block of inode table for each AG
     config: XfsRecoveryConfig,
+    dir_reconstructor: DirReconstructor, // NEW: Directory structure reconstructor
+    dir_parser: XfsDirParser, // NEW: Directory entry parser
+    attr_parser: XfsAttrParser, // NEW: Extended attribute parser
 }
 
 impl XfsRecoveryEngine {
@@ -121,16 +128,21 @@ impl XfsRecoveryEngine {
     pub fn new_with_config(device: BlockDevice, config: XfsRecoveryConfig) -> Result<Self> {
         tracing::info!("🔧 Initializing XFS Recovery Engine");
         
+        let block_size = 4096; // Default, will be updated from superblock
+        
         let mut engine = XfsRecoveryEngine {
             device,
             superblock: None,
             ag_count: 4,
             ag_blocks: 1000,
-            block_size: 4096,
+            block_size,
             sector_size: 512,
             inode_size: 256,
             inodes_per_block: 16,
             ag_inode_table_blocks: Vec::new(),
+            dir_reconstructor: DirReconstructor::new(),
+            dir_parser: XfsDirParser::new(block_size),
+            attr_parser: XfsAttrParser::new(),
             config,
         };
         
@@ -148,6 +160,9 @@ impl XfsRecoveryEngine {
                 engine.inode_size = sb.inode_size;
                 engine.inodes_per_block = sb.inodes_per_block;
                 engine.superblock = Some(sb);
+                
+                // Update dir_parser with actual block size
+                engine.dir_parser = XfsDirParser::new(engine.block_size);
                 
                 // Calculate inode table locations for each AG
                 engine.calculate_ag_inode_tables()?;
@@ -291,9 +306,51 @@ impl XfsRecoveryEngine {
         Ok(())
     }
 
+    /// Scan for directory blocks to extract filenames and build directory structure
+    /// This should be called before scan_deleted_files to populate the reconstructor
+    fn scan_directory_blocks(&mut self) -> Result<()> {
+        tracing::info!("📂 Scanning for directory blocks to recover filenames");
+        
+        let total_blocks = self.device.size() / self.block_size as u64;
+        let scan_limit = std::cmp::min(total_blocks, 10000); // Sample first 10k blocks for directories
+        
+        let mut dir_entries_found = 0;
+        
+        for block_num in 0..scan_limit {
+            // Read block
+            let block_data = match self.device.read_block(block_num, self.block_size) {
+                Ok(data) => data,
+                Err(_) => continue,
+            };
+            
+            // Try to parse as directory block
+            match self.dir_parser.parse_dir_block(&block_data, 0) {
+                Ok(entries) => {
+                    if !entries.is_empty() {
+                        dir_entries_found += entries.len();
+                        self.dir_reconstructor.add_entries(entries);
+                    }
+                }
+                Err(_) => {
+                    // Not a directory block, continue
+                }
+            }
+        }
+        
+        tracing::info!("📂 Found {} directory entries across scanned blocks", dir_entries_found);
+        Ok(())
+    }
+
     /// Comprehensive scan for deleted files across all allocation groups
-    pub fn scan_deleted_files(&self) -> Result<Vec<crate::DeletedFile>> {
+    pub fn scan_deleted_files(&mut self) -> Result<Vec<crate::DeletedFile>> {
         tracing::info!("🔍 Starting comprehensive XFS deleted file scan");
+        
+        // PHASE 1: Scan directory blocks to build filename database
+        if let Err(e) = self.scan_directory_blocks() {
+            tracing::warn!("⚠️ Directory block scan failed: {}", e);
+            // Continue anyway, we'll just have generic filenames
+        }
+        
         let mut deleted_files = Vec::new();
         let mut file_id_counter = 1u64;
 
@@ -912,13 +969,29 @@ impl XfsRecoveryEngine {
     }
 
     /// Generate a reasonable filename for a recovered file
+    /// First tries to get the original filename from directory entries,
+    /// falls back to generating a name based on inode and type
     fn generate_filename(&self, inode_number: u64, extension: &Option<String>, file_type: &crate::FileType) -> std::path::PathBuf {
+        // PHASE 1: Try to get actual filename from directory reconstructor
+        if let Some(path) = self.dir_reconstructor.reconstruct_path(inode_number) {
+            tracing::debug!("📝 Recovered original filename for inode {}: {}", inode_number, path.display());
+            return path;
+        }
+        
+        // PHASE 2: Try to get just the filename (without full path)
+        if let Some(filename) = self.dir_reconstructor.get_filename(inode_number) {
+            tracing::debug!("📝 Recovered filename for inode {}: {}", inode_number, filename);
+            return std::path::PathBuf::from(filename);
+        }
+        
+        // PHASE 3: Generate a generic filename based on inode and detected type
         let ext = extension.as_deref().unwrap_or(match file_type {
             crate::FileType::Directory => "dir",
             crate::FileType::SymbolicLink => "link",
             _ => "bin",
         });
         
+        tracing::debug!("📝 Generated generic filename for inode {}: inode_{}.{}", inode_number, inode_number, ext);
         std::path::PathBuf::from(format!("inode_{}.{}", inode_number, ext))
     }
 
@@ -954,7 +1027,7 @@ impl XfsRecoveryEngine {
     }
 
     /// Recover file data for a specific inode
-    pub fn recover_file(&self, inode: u64) -> Result<Vec<u8>> {
+    pub fn recover_file(&mut self, inode: u64) -> Result<Vec<u8>> {
         tracing::info!("🔄 Recovering file data for inode {}", inode);
         
         // First, try to find the inode in our scanned files

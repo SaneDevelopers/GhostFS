@@ -1,0 +1,8 @@
+{
+  "records": [
+    {"id": 1, "name": "Alice Johnson", "email": "alice@company.com", "balance": 1500.50},
+    {"id": 2, "name": "Bob Williams", "email": "bob@company.com", "balance": 2300.75},
+    {"id": 3, "name": "Carol Davis", "email": "carol@company.com", "balance": 890.25}
+  ],
+  "metadata": {"total": 3, "version": "2.1", "timestamp": "2026-02-03T10:30:00Z"}
+}

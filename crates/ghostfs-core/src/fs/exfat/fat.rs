@@ -20,6 +20,7 @@ use crate::fs::common::BlockDevice;
 pub const FAT_ENTRY_FREE: u32 = 0x00000000;
 pub const FAT_ENTRY_BAD: u32 = 0xFFFFFFF7;
 pub const FAT_ENTRY_EOC_MIN: u32 = 0xFFFFFFF8; // End of chain minimum
+pub const FAT_ENTRY_EOC_MAX: u32 = 0xFFFFFFFF; // End of chain maximum
 
 /// exFAT File Allocation Table
 #[derive(Debug)]
@@ -221,6 +222,8 @@ mod tests {
         assert_eq!(FAT_ENTRY_FREE, 0);
         assert_eq!(FAT_ENTRY_BAD, 0xFFFFFFF7);
         assert!(FAT_ENTRY_EOC_MIN >= 0xFFFFFFF8);
+        // Ensure EOC_MIN is less than or equal to EOC_MAX
+        assert!(FAT_ENTRY_EOC_MIN <= FAT_ENTRY_EOC_MAX);
     }
 
     #[test]

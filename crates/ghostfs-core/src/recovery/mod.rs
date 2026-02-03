@@ -1,5 +1,6 @@
 /// Recovery module containing advanced algorithms and strategies
 pub mod confidence;
+pub mod directory;
 pub mod engine;
 pub mod signatures;
 
@@ -16,4 +17,9 @@ pub use signatures::{
 pub use engine::{
     RecoveryConfig, RecoveryEngine, RecoveryError, RecoveryProgress, RecoveryResult, RecoveryStage,
     RecoveryStatistics, RecoveryStrategy, ScanDepth,
+};
+
+pub use directory::{
+    BtrfsDirEntry, BtrfsDirReconstructor, DirectoryReconstructor, ExFatDirEntry,
+    ExFatDirReconstructor, ReconstructionStats, XfsDirEntry, XfsDirReconstructor,
 };

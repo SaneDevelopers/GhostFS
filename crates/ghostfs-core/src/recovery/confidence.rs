@@ -17,8 +17,8 @@ const TIME_THRESHOLD_90_DAYS: i64 = 90;
 const TIME_THRESHOLD_365_DAYS: i64 = 365;
 
 // XFS-specific validation thresholds
-const XFS_MAX_REASONABLE_GENERATION: u64 = 10_000_000;
-const XFS_MAX_REASONABLE_AG_INODE_NUMBER: u64 = 100_000_000;
+const XFS_MAX_REASONABLE_GENERATION: u32 = 10_000_000;
+const XFS_MAX_REASONABLE_AG_INODE_NUMBER: u32 = 100_000_000;
 const XFS_MAX_REASONABLE_LINK_COUNT: u32 = 1000;
 const XFS_LOCAL_EXTENT_MAX_SIZE: u64 = 156; // Bytes that fit in inode
 const XFS_DIRECT_EXTENT_MAX_COUNT: u32 = 20; // Max extents before needing B+tree
@@ -49,47 +49,42 @@ pub enum ActivityLevel {
 
 /// Calculate confidence score for a deleted file
 pub fn calculate_confidence_score(file: &DeletedFile, context: &ConfidenceContext) -> f32 {
-    let mut factors = Vec::new();
-
-    // Time-based factors (25% weight)
-    factors.push(ConfidenceFactor {
-        name: "time_recency",
-        score: calculate_time_recency_factor(file.deletion_time, context.scan_time),
-        weight: 0.25,
-    });
-
-    // Structural integrity factors (35% weight)
-    factors.push(ConfidenceFactor {
-        name: "metadata_completeness",
-        score: calculate_metadata_completeness_factor(&file.metadata),
-        weight: 0.15,
-    });
-
-    factors.push(ConfidenceFactor {
-        name: "data_block_integrity",
-        score: calculate_data_block_integrity_factor(&file.data_blocks),
-        weight: 0.20,
-    });
-
-    // Content validation factors (25% weight)
-    factors.push(ConfidenceFactor {
-        name: "file_signature_match",
-        score: calculate_file_signature_factor(file),
-        weight: 0.15,
-    });
-
-    factors.push(ConfidenceFactor {
-        name: "size_consistency",
-        score: calculate_size_consistency_factor(file),
-        weight: 0.10,
-    });
-
-    // File system specific factors (15% weight)
-    factors.push(ConfidenceFactor {
-        name: "fs_specific",
-        score: calculate_fs_specific_factor(file, context),
-        weight: 0.15,
-    });
+    let factors = [
+        // Time-based factors (25% weight)
+        ConfidenceFactor {
+            name: "time_recency",
+            score: calculate_time_recency_factor(file.deletion_time, context.scan_time),
+            weight: 0.25,
+        },
+        // Structural integrity factors (35% weight)
+        ConfidenceFactor {
+            name: "metadata_completeness",
+            score: calculate_metadata_completeness_factor(&file.metadata),
+            weight: 0.15,
+        },
+        ConfidenceFactor {
+            name: "data_block_integrity",
+            score: calculate_data_block_integrity_factor(&file.data_blocks),
+            weight: 0.20,
+        },
+        // Content validation factors (25% weight)
+        ConfidenceFactor {
+            name: "file_signature_match",
+            score: calculate_file_signature_factor(file),
+            weight: 0.15,
+        },
+        ConfidenceFactor {
+            name: "size_consistency",
+            score: calculate_size_consistency_factor(file),
+            weight: 0.10,
+        },
+        // File system specific factors (15% weight)
+        ConfidenceFactor {
+            name: "fs_specific",
+            score: calculate_fs_specific_factor(file, context),
+            weight: 0.15,
+        },
+    ];
 
     // Calculate weighted average
     let total_weighted_score: f32 = factors.iter().map(|f| f.score * f.weight).sum();

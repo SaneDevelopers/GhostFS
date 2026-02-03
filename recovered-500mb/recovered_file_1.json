@@ -1,6 +1,0 @@
-{
-  "users": [
-    {"id": 1, "name": "John Doe", "active": true},
-    {"id": 2, "name": "Jane Smith", "active": false}
-  ]
-}

@@ -226,7 +226,7 @@ impl RecoveryEngine {
                 };
                 
                 match xfs_engine {
-                    Ok(mut engine) => {
+                    Ok(engine) => {
                         match engine.scan_deleted_files() {
                             Ok(mut files) => {
                                 tracing::info!("🔄 XFS engine returned {} files", files.len());

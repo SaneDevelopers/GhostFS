@@ -149,9 +149,8 @@ fn get_xfs_config_for_scan(image: &PathBuf, interactive: bool) -> Result<Option<
     
     let total_size_gb = (total_blocks * block_size as u64) as f64 / (1024.0 * 1024.0 * 1024.0);
     
-	// Prompt user only if filesystem is large (>100GB) and interactive mode
-	// NOTE: Lowered threshold for development/testing (see TESTING_NOTES.md Option 2)
-	if interactive && total_size_gb > 0.001 {
+    // Prompt user only if filesystem is large (>100GB) and interactive mode
+    if interactive && total_size_gb > 100.0 {
         if let Ok(Some(custom_blocks)) = prompt_scan_limit(total_blocks, block_size) {
             let mut config = XfsRecoveryConfig::default();
             config.max_scan_blocks = Some(custom_blocks);

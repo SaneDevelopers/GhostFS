@@ -72,8 +72,7 @@ pub struct DeletedFile {
     pub metadata: FileMetadata,
 
     /// Filesystem-specific metadata for confidence scoring
-    /// Not serialized (too complex and context-specific)
-    #[serde(skip)]
+    /// Serialized to preserve full recovery session fidelity when saving/loading sessions
     pub fs_metadata: Option<FsSpecificMetadata>,
 }
 
@@ -110,7 +109,9 @@ pub struct BlockRange {
 }
 
 /// Filesystem-specific metadata for confidence scoring
-#[derive(Debug, Clone)]
+/// This metadata is crucial for accurate confidence calculations and is now fully serializable
+/// to support session persistence and recovery result caching.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FsSpecificMetadata {
     Xfs(XfsFileMetadata),
     Btrfs(BtrfsFileMetadata),
@@ -118,7 +119,7 @@ pub enum FsSpecificMetadata {
 }
 
 /// XFS-specific file metadata for confidence scoring
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XfsFileMetadata {
     /// Which allocation group contains the inode
     pub ag_number: u32,
@@ -137,7 +138,7 @@ pub struct XfsFileMetadata {
 }
 
 /// XFS extent storage format
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum XfsExtentFormat {
     /// Data stored directly in inode (small files)
     Local,
@@ -148,7 +149,7 @@ pub enum XfsExtentFormat {
 }
 
 /// Btrfs-specific file metadata for confidence scoring
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BtrfsFileMetadata {
     /// Btrfs generation number
     pub generation: u64,
@@ -167,7 +168,7 @@ pub struct BtrfsFileMetadata {
 }
 
 /// exFAT-specific file metadata for confidence scoring
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExFatFileMetadata {
     /// Starting cluster number
     pub first_cluster: u32,
@@ -430,19 +431,19 @@ fn recover_single_file(
     let mut output_file = File::create(&output_path)?;
     let mut bytes_written = 0u64;
 
-    // Determine block size based on filesystem type
-    // Note: For exFAT, we use byte offsets directly (block_size = 1)
-    // For other filesystems, we use actual block sizes
-    let block_size = match fs_type {
+    // Determine block-to-byte conversion multiplier based on filesystem type
+    // XFS/Btrfs: block numbers need to be multiplied by block size (4096)
+    // exFAT: data_blocks already store byte offsets, so multiplier is 1
+    let offset_multiplier = match fs_type {
         FileSystemType::Xfs => 4096,
         FileSystemType::Btrfs => 4096,
-        FileSystemType::ExFat => 1, // exFAT uses byte offsets directly
+        FileSystemType::ExFat => 1, // exFAT data_blocks use byte offsets
     };
 
     // Recover data from each block range
     for block_range in &deleted_file.data_blocks {
-        let start_offset = block_range.start_block * block_size as u64;
-        let total_bytes = block_range.block_count * block_size as u64;
+        let start_offset = block_range.start_block * offset_multiplier as u64;
+        let total_bytes = block_range.block_count * offset_multiplier as u64;
         let end_offset = start_offset + total_bytes;
 
         // Make sure we don't read past the end of the image

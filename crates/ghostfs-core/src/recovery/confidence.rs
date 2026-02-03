@@ -4,6 +4,32 @@ use std::collections::HashMap;
 
 use crate::{BlockRange, DeletedFile, FileMetadata, FileSystemType};
 
+// =============================================================================
+// CONFIDENCE SCORING THRESHOLDS AND CONSTANTS
+// =============================================================================
+
+// Time-based recency thresholds (for deletion time analysis)
+const TIME_THRESHOLD_1_HOUR: i64 = 1;
+const TIME_THRESHOLD_24_HOURS: i64 = 24;
+const TIME_THRESHOLD_7_DAYS: i64 = 7;
+const TIME_THRESHOLD_30_DAYS: i64 = 30;
+const TIME_THRESHOLD_90_DAYS: i64 = 90;
+const TIME_THRESHOLD_365_DAYS: i64 = 365;
+
+// XFS-specific validation thresholds
+const XFS_MAX_REASONABLE_GENERATION: u64 = 10_000_000;
+const XFS_MAX_REASONABLE_AG_INODE_NUMBER: u64 = 100_000_000;
+const XFS_MAX_REASONABLE_LINK_COUNT: u32 = 1000;
+const XFS_LOCAL_EXTENT_MAX_SIZE: u64 = 156; // Bytes that fit in inode
+const XFS_DIRECT_EXTENT_MAX_COUNT: u32 = 20; // Max extents before needing B+tree
+const XFS_BTREE_EXTENT_MIN_COUNT: u32 = 10; // Min extents to justify B+tree
+const XFS_MIN_REASONABLE_EXTENT_SIZE: u64 = 4096; // 4 KB
+const XFS_MAX_REASONABLE_EXTENT_SIZE: u64 = 10_485_760; // 10 MB
+const XFS_MAX_REASONABLE_FILE_SIZE: u64 = 10_995_116_277_760; // 10 TB
+
+// Block size assumption (used when FS-specific info unavailable)
+const ASSUMED_BLOCK_SIZE: u64 = 4096;
+
 /// Context for confidence scoring calculations
 #[derive(Debug, Clone)]
 pub struct ConfidenceContext {
@@ -102,12 +128,12 @@ fn calculate_time_recency_factor(
 
             // More recent deletions have higher confidence
             match time_since_deletion {
-                d if d < Duration::hours(1) => 1.0,
-                d if d < Duration::hours(24) => 0.9,
-                d if d < Duration::days(7) => 0.8,
-                d if d < Duration::days(30) => 0.6,
-                d if d < Duration::days(90) => 0.4,
-                d if d < Duration::days(365) => 0.2,
+                d if d < Duration::hours(TIME_THRESHOLD_1_HOUR) => 1.0,
+                d if d < Duration::hours(TIME_THRESHOLD_24_HOURS) => 0.9,
+                d if d < Duration::days(TIME_THRESHOLD_7_DAYS) => 0.8,
+                d if d < Duration::days(TIME_THRESHOLD_30_DAYS) => 0.6,
+                d if d < Duration::days(TIME_THRESHOLD_90_DAYS) => 0.4,
+                d if d < Duration::days(TIME_THRESHOLD_365_DAYS) => 0.2,
                 _ => 0.1,
             }
         }
@@ -205,7 +231,7 @@ fn calculate_size_consistency_factor(file: &DeletedFile) -> f32 {
     let block_size: u64 = file
         .data_blocks
         .iter()
-        .map(|range| range.block_count * 4096) // Assume 4KB blocks
+        .map(|range| range.block_count * ASSUMED_BLOCK_SIZE)
         .sum();
 
     if declared_size == 0 && block_size == 0 {
@@ -263,19 +289,19 @@ fn calculate_xfs_ag_validity(meta: &crate::XfsFileMetadata) -> f32 {
 
     // Factor 1: Generation counter is reasonable (not corrupted)
     // XFS generation counters typically don't exceed millions
-    if meta.inode_generation > 0 && meta.inode_generation < 10_000_000 {
+    if meta.inode_generation > 0 && meta.inode_generation < XFS_MAX_REASONABLE_GENERATION {
         score += 0.33;
     }
 
     // Factor 2: AG inode number is reasonable
     // Most filesystems have millions of inodes per AG, not billions
-    if meta.ag_inode_number < 100_000_000 {
+    if meta.ag_inode_number < XFS_MAX_REASONABLE_AG_INODE_NUMBER {
         score += 0.33;
     }
 
     // Factor 3: Link count before deletion was reasonable
     // Files rarely have more than 1000 hard links
-    if meta.last_link_count > 0 && meta.last_link_count < 1000 {
+    if meta.last_link_count > 0 && meta.last_link_count < XFS_MAX_REASONABLE_LINK_COUNT {
         score += 0.34;
     }
 
@@ -288,9 +314,9 @@ fn calculate_xfs_extent_integrity(file: &DeletedFile, meta: &crate::XfsFileMetad
 
     // Factor 1: Extent format matches file size
     let format_appropriate = match meta.extent_format {
-        crate::XfsExtentFormat::Local => file.size < 156, // Fits in inode
-        crate::XfsExtentFormat::Extents => meta.extent_count <= 20, // Reasonable for direct list
-        crate::XfsExtentFormat::Btree => meta.extent_count > 10, // Needs btree
+        crate::XfsExtentFormat::Local => file.size < XFS_LOCAL_EXTENT_MAX_SIZE,
+        crate::XfsExtentFormat::Extents => meta.extent_count <= XFS_DIRECT_EXTENT_MAX_COUNT,
+        crate::XfsExtentFormat::Btree => meta.extent_count > XFS_BTREE_EXTENT_MIN_COUNT,
     };
     if format_appropriate {
         score += 0.4;
@@ -303,9 +329,11 @@ fn calculate_xfs_extent_integrity(file: &DeletedFile, meta: &crate::XfsFileMetad
 
     // Factor 3: Extent count is reasonable for file size
     if meta.extent_count > 0 {
-        // Average extent size should be reasonable (4KB to 10MB)
+        // Average extent size should be reasonable
         let avg_extent_size = file.size / meta.extent_count as u64;
-        if (4096..=10_485_760).contains(&avg_extent_size) {
+        if (XFS_MIN_REASONABLE_EXTENT_SIZE..=XFS_MAX_REASONABLE_EXTENT_SIZE)
+            .contains(&avg_extent_size)
+        {
             score += 0.3;
         }
     } else if file.size == 0 {
@@ -322,8 +350,7 @@ fn calculate_xfs_inode_consistency(file: &DeletedFile, meta: &crate::XfsFileMeta
 
     // Factor 1: File size is reasonable
     // Files larger than 10TB are uncommon and might indicate corruption
-    if file.size < 10_995_116_277_760 {
-        // 10 TB
+    if file.size < XFS_MAX_REASONABLE_FILE_SIZE {
         score += 0.4;
     }
 

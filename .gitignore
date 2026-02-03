@@ -48,3 +48,7 @@ Thumbs.db
 # Recovery output
 /recovered/
 /output/
+/recovered-exfat
+/recovered-btrfs
+/recovered-xfs
+info.txt

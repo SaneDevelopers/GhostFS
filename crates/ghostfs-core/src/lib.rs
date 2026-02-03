@@ -12,9 +12,8 @@ pub mod recovery;
 
 // Re-export key recovery types
 pub use recovery::{
-    RecoveryEngine, RecoveryConfig, RecoveryResult, RecoveryError,
-    RecoveryProgress, RecoveryStage, ActivityLevel, ConfidenceReport,
-    FileSignature, SignatureAnalysisResult
+    ActivityLevel, ConfidenceReport, FileSignature, RecoveryConfig, RecoveryEngine, RecoveryError,
+    RecoveryProgress, RecoveryResult, RecoveryStage, SignatureAnalysisResult,
 };
 
 // Re-export XFS recovery config for advanced users
@@ -62,15 +61,20 @@ pub struct SessionMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeletedFile {
     pub id: u64,
-    pub inode_or_cluster: u64,    // inode (XFS/Btrfs) or cluster (exFAT)
+    pub inode_or_cluster: u64, // inode (XFS/Btrfs) or cluster (exFAT)
     pub original_path: Option<PathBuf>,
     pub size: u64,
     pub deletion_time: Option<DateTime<Utc>>,
-    pub confidence_score: f32,    // 0.0-1.0
+    pub confidence_score: f32, // 0.0-1.0
     pub file_type: FileType,
     pub data_blocks: Vec<BlockRange>,
     pub is_recoverable: bool,
     pub metadata: FileMetadata,
+
+    /// Filesystem-specific metadata for confidence scoring
+    /// Not serialized (too complex and context-specific)
+    #[serde(skip)]
+    pub fs_metadata: Option<FsSpecificMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +109,82 @@ pub struct BlockRange {
     pub is_allocated: bool,
 }
 
+/// Filesystem-specific metadata for confidence scoring
+#[derive(Debug, Clone)]
+pub enum FsSpecificMetadata {
+    Xfs(XfsFileMetadata),
+    Btrfs(BtrfsFileMetadata),
+    ExFat(ExFatFileMetadata),
+}
+
+/// XFS-specific file metadata for confidence scoring
+#[derive(Debug, Clone)]
+pub struct XfsFileMetadata {
+    /// Which allocation group contains the inode
+    pub ag_number: u32,
+    /// Inode number within the AG
+    pub ag_inode_number: u32,
+    /// Number of data extents
+    pub extent_count: u32,
+    /// Format of extent storage (local/extent list/btree)
+    pub extent_format: XfsExtentFormat,
+    /// Whether extents are properly aligned
+    pub is_aligned: bool,
+    /// Link count before deletion
+    pub last_link_count: u32,
+    /// XFS generation counter
+    pub inode_generation: u32,
+}
+
+/// XFS extent storage format
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XfsExtentFormat {
+    /// Data stored directly in inode (small files)
+    Local,
+    /// Direct extent list in inode
+    Extents,
+    /// B+tree format (large files with many extents)
+    Btree,
+}
+
+/// Btrfs-specific file metadata for confidence scoring
+#[derive(Debug, Clone)]
+pub struct BtrfsFileMetadata {
+    /// Btrfs generation number
+    pub generation: u64,
+    /// Transaction ID
+    pub transid: u64,
+    /// Whether checksum validation passed
+    pub checksum_valid: bool,
+    /// File exists in a snapshot
+    pub in_snapshot: bool,
+    /// Number of COW (copy-on-write) extents
+    pub cow_extent_count: u32,
+    /// Extent reference counts
+    pub extent_refs: Vec<u64>,
+    /// Level in B-tree (0 = leaf)
+    pub tree_level: u8,
+}
+
+/// exFAT-specific file metadata for confidence scoring
+#[derive(Debug, Clone)]
+pub struct ExFatFileMetadata {
+    /// Starting cluster number
+    pub first_cluster: u32,
+    /// Full FAT cluster chain
+    pub cluster_chain: Vec<u32>,
+    /// Whether FAT chain is valid and complete
+    pub chain_valid: bool,
+    /// Whether filename is valid UTF-16
+    pub utf16_valid: bool,
+    /// Number of directory entries (file + stream + name entries)
+    pub entry_count: u8,
+    /// Directory entry set checksum
+    pub checksum: u16,
+    /// File attributes from directory entry
+    pub attributes: u16,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimelineEntry {
     pub timestamp: DateTime<Utc>,
@@ -124,7 +204,7 @@ pub enum TimelineEventType {
 /// Main scanning function - enhanced version
 pub fn scan_image(image_path: &Path, fs: FileSystemType) -> Result<RecoverySession> {
     tracing::info!("Starting scan of {} as {}", image_path.display(), fs);
-    
+
     // For now, create a basic session with placeholder data
     // This will be replaced with actual file system scanning logic
     let session = RecoverySession {
@@ -146,8 +226,8 @@ pub fn scan_image(image_path: &Path, fs: FileSystemType) -> Result<RecoverySessi
     };
 
     tracing::info!(
-        "Created session {} for {} file system", 
-        session.id, 
+        "Created session {} for {} file system",
+        session.id,
         session.fs_type
     );
 
@@ -161,21 +241,21 @@ pub fn scan_and_analyze(image_path: &Path, fs: FileSystemType) -> Result<Recover
 
 /// Scan and analyze with custom XFS configuration
 pub fn scan_and_analyze_with_config(
-    image_path: &Path, 
-    fs: FileSystemType, 
-    xfs_config: Option<fs::xfs::XfsRecoveryConfig>
+    image_path: &Path,
+    fs: FileSystemType,
+    xfs_config: Option<fs::xfs::XfsRecoveryConfig>,
 ) -> Result<RecoverySession> {
-    use recovery::{RecoveryEngine, RecoveryConfig, ScanDepth, RecoveryStrategy};
     use memmap2::MmapOptions;
+    use recovery::{RecoveryConfig, RecoveryEngine, RecoveryStrategy, ScanDepth};
     use std::fs::File;
-    
+
     // Software auto-determines recoverability based on confidence scoring
     // Files with >= 40% confidence are marked as recoverable
     const AUTO_CONFIDENCE_THRESHOLD: f32 = 0.4;
-    
+
     let file = File::open(image_path)?;
     let mmap = unsafe { MmapOptions::new().map(&file)? };
-    
+
     // Create recovery configuration
     let config = RecoveryConfig {
         min_confidence_threshold: AUTO_CONFIDENCE_THRESHOLD,
@@ -188,7 +268,7 @@ pub fn scan_and_analyze_with_config(
         xfs_config,
         ..Default::default()
     };
-    
+
     // Initialize recovery engine
     let session_id = Uuid::new_v4().to_string();
     let mut engine = RecoveryEngine::new(
@@ -198,20 +278,20 @@ pub fn scan_and_analyze_with_config(
         session_id.clone(),
         config,
     );
-    
+
     // Set up progress callback
     engine.set_progress_callback(|progress| {
         tracing::info!(
-            "Recovery progress: {:.1}% - {} ({} files found)", 
+            "Recovery progress: {:.1}% - {} ({} files found)",
             progress.progress_percent,
             progress.current_operation,
             progress.files_found
         );
     });
-    
+
     // Execute recovery
     let recovery_result = engine.execute_recovery()?;
-    
+
     // Convert to legacy session format
     let session = RecoverySession {
         id: Uuid::parse_str(&recovery_result.session_id)?,
@@ -230,52 +310,60 @@ pub fn scan_and_analyze_with_config(
             recoverable_files: recovery_result.recoverable_files as u32,
         },
     };
-    
+
     tracing::info!(
         "Recovery complete: {} files found, {} recoverable (auto-threshold: {})",
         recovery_result.total_files_found,
         recovery_result.recoverable_files,
         AUTO_CONFIDENCE_THRESHOLD
     );
-    
+
     Ok(session)
 }
 
 /// Recover files from a session to the specified output directory
 pub fn recover_files(
-    image_path: &Path, 
-    session: &RecoverySession, 
+    image_path: &Path,
+    session: &RecoverySession,
     output_dir: &Path,
     file_ids: Option<Vec<u64>>,
 ) -> Result<RecoveryReport> {
-    use std::fs::create_dir_all;
     use memmap2::MmapOptions;
-    
+    use std::fs::create_dir_all;
+
     // Create output directory if it doesn't exist
     create_dir_all(output_dir)?;
-    
+
     // Open the source image for reading
     let source_file = std::fs::File::open(image_path)?;
     let mmap = unsafe { MmapOptions::new().map(&source_file)? };
-    
+
     let mut recovered_count = 0;
     let mut failed_count = 0;
     let mut total_bytes_recovered = 0u64;
     let mut recovery_details = Vec::new();
-    
+
     // Filter files to recover
     let files_to_recover: Vec<&DeletedFile> = if let Some(ids) = file_ids {
-        session.scan_results.iter()
+        session
+            .scan_results
+            .iter()
             .filter(|f| ids.contains(&f.id))
             .collect()
     } else {
-        session.scan_results.iter()
+        session
+            .scan_results
+            .iter()
             .filter(|f| f.is_recoverable)
             .collect()
     };
-    
-    tracing::info!("Starting recovery of {} files to {}", files_to_recover.len(), output_dir.display());
-    
+
+    tracing::info!(
+        "Starting recovery of {} files to {}",
+        files_to_recover.len(),
+        output_dir.display()
+    );
+
     for deleted_file in &files_to_recover {
         match recover_single_file(&mmap, deleted_file, output_dir, session.fs_type) {
             Ok(bytes_recovered) => {
@@ -290,7 +378,11 @@ pub fn recover_files(
                     status: RecoveryStatus::Success,
                     confidence_score: deleted_file.confidence_score,
                 });
-                tracing::info!("✅ Recovered file ID {} ({} bytes)", deleted_file.id, bytes_recovered);
+                tracing::info!(
+                    "✅ Recovered file ID {} ({} bytes)",
+                    deleted_file.id,
+                    bytes_recovered
+                );
             }
             Err(e) => {
                 failed_count += 1;
@@ -307,7 +399,7 @@ pub fn recover_files(
             }
         }
     }
-    
+
     let report = RecoveryReport {
         total_files: files_to_recover.len(),
         recovered_files: recovered_count,
@@ -316,14 +408,14 @@ pub fn recover_files(
         output_directory: output_dir.to_path_buf(),
         recovery_details,
     };
-    
+
     tracing::info!(
-        "Recovery complete: {}/{} files recovered, {} bytes total", 
-        recovered_count, 
+        "Recovery complete: {}/{} files recovered, {} bytes total",
+        recovered_count,
         files_to_recover.len(),
         total_bytes_recovered
     );
-    
+
     Ok(report)
 }
 
@@ -337,54 +429,56 @@ fn recover_single_file(
     let output_path = generate_recovery_path(output_dir, deleted_file);
     let mut output_file = File::create(&output_path)?;
     let mut bytes_written = 0u64;
-    
+
     // Determine block size based on filesystem type
+    // Note: For exFAT, we use byte offsets directly (block_size = 1)
+    // For other filesystems, we use actual block sizes
     let block_size = match fs_type {
         FileSystemType::Xfs => 4096,
         FileSystemType::Btrfs => 4096,
-        FileSystemType::ExFat => 512,
+        FileSystemType::ExFat => 1, // exFAT uses byte offsets directly
     };
-    
+
     // Recover data from each block range
     for block_range in &deleted_file.data_blocks {
         let start_offset = block_range.start_block * block_size as u64;
         let total_bytes = block_range.block_count * block_size as u64;
         let end_offset = start_offset + total_bytes;
-        
+
         // Make sure we don't read past the end of the image
         if start_offset >= mmap.len() as u64 {
             tracing::warn!("Block range starts beyond image bounds: {}", start_offset);
             continue;
         }
-        
+
         let actual_end = std::cmp::min(end_offset, mmap.len() as u64);
         let actual_bytes = actual_end - start_offset;
-        
+
         // Also limit by the file's expected size
         let remaining_file_bytes = deleted_file.size.saturating_sub(bytes_written);
         let bytes_to_copy = std::cmp::min(actual_bytes, remaining_file_bytes);
-        
+
         if bytes_to_copy > 0 {
             let data_slice = &mmap[start_offset as usize..(start_offset + bytes_to_copy) as usize];
             output_file.write_all(data_slice)?;
             bytes_written += bytes_to_copy;
-            
+
             tracing::debug!(
-                "Copied {} bytes from block range {}-{}", 
-                bytes_to_copy, 
-                block_range.start_block, 
+                "Copied {} bytes from block range {}-{}",
+                bytes_to_copy,
+                block_range.start_block,
                 block_range.start_block + block_range.block_count
             );
         }
-        
+
         // Stop if we've recovered the expected file size
         if bytes_written >= deleted_file.size {
             break;
         }
     }
-    
+
     output_file.flush()?;
-    
+
     // Set file permissions if available
     if let Some(permissions) = deleted_file.metadata.permissions {
         #[cfg(unix)]
@@ -394,7 +488,7 @@ fn recover_single_file(
             std::fs::set_permissions(&output_path, perms)?;
         }
     }
-    
+
     Ok(bytes_written)
 }
 
@@ -402,13 +496,16 @@ fn recover_single_file(
 fn generate_recovery_path(output_dir: &Path, deleted_file: &DeletedFile) -> PathBuf {
     let filename = if let Some(ref original_path) = deleted_file.original_path {
         // Use the original filename if available
-        original_path.file_name()
+        original_path
+            .file_name()
             .and_then(|name| name.to_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("recovered_file_{}", deleted_file.id))
     } else {
         // Generate filename based on file type and metadata
-        let extension = deleted_file.metadata.file_extension
+        let extension = deleted_file
+            .metadata
+            .file_extension
             .as_ref()
             .map(|ext| format!(".{}", ext))
             .unwrap_or_else(|| match deleted_file.file_type {
@@ -416,10 +513,10 @@ fn generate_recovery_path(output_dir: &Path, deleted_file: &DeletedFile) -> Path
                 FileType::Directory => "".to_string(),
                 _ => ".unknown".to_string(),
             });
-        
+
         format!("recovered_file_{}{}", deleted_file.id, extension)
     };
-    
+
     output_dir.join(filename)
 }
 

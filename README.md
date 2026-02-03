@@ -61,18 +61,24 @@ sudo cp target/release/ghostfs-cli /usr/local/bin/ghostfs
 ```bash
 ghostfs detect /dev/sdb1
 # Output: ✅ Detected: XFS
+
+ghostfs detect /path/to/btrfs-image.img
+# Output: ✅ Detected: Btrfs
+
+ghostfs detect /mnt/usb/exfat-drive.img
+# Output: ✅ Detected: exFAT
 ```
 
 **2. Scan for Deleted Files**
 ```bash
-# Basic scan with default settings
+# XFS scan with default settings
 ghostfs scan /dev/sdb1 --fs xfs
 
-# Custom confidence threshold (30% minimum)
-ghostfs scan /dev/sdb1 --fs xfs --confidence 0.3
+# Btrfs scan with custom confidence threshold
+ghostfs scan /path/to/btrfs.img --fs btrfs --confidence 0.3
 
-# Save to specific session file
-ghostfs scan /dev/sdb1 --fs xfs --output my_recovery.db
+# exFAT scan saving to specific session file
+ghostfs scan /dev/sdc1 --fs exfat --output exfat_recovery.db
 ```
 
 **3. List Recovered Files**
@@ -128,11 +134,16 @@ Scans for deleted files and creates a recovery session.
 # Basic XFS scan
 ghostfs scan /dev/sdb1 --fs xfs
 
-# Low confidence threshold for maximum recovery
-ghostfs scan /dev/sdb1 --fs btrfs --confidence 0.2
+# Btrfs scan with low confidence threshold for maximum recovery
+ghostfs scan /path/to/btrfs.img --fs btrfs --confidence 0.2
 
-# Forensics scan with detailed logging
-ghostfs scan /dev/sdb1 --fs exfat --forensics --verbose
+# exFAT forensics scan with detailed logging
+ghostfs scan /dev/sdc1 --fs exfat --forensics --verbose
+
+# Using cargo run for development
+cargo run -p ghostfs-cli -- scan test-data/test-xfs.img
+cargo run -p ghostfs-cli -- scan test-data/test-btrfs.img  
+cargo run -p ghostfs-cli -- scan test-data/test-exfat.img
 ```
 
 #### `ghostfs list [options]`
@@ -462,7 +473,7 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 - **Wiki**: Additional documentation and guides
 
 ### Professional Support
-- **Email**: support@ghostfs.com
+- **Email**: sanedevelopers2025@gmail.com
 - **Enterprise**: Custom development and integration
 - **Training**: Forensics workshops and certification
 

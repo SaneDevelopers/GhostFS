@@ -2,7 +2,6 @@
 ///
 /// Provides functionality to analyze deletion patterns, generate recovery timelines,
 /// and detect suspicious file deletion activities from recovery sessions.
-
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -164,7 +163,9 @@ impl RecoveryTimeline {
             // Check if this window overlaps with already processed windows
             if processed_windows
                 .iter()
-                .any(|&(start, _): &(usize, usize)| window_start >= start && window_start < start + 5)
+                .any(|&(start, _): &(usize, usize)| {
+                    window_start >= start && window_start < start + 5
+                })
             {
                 continue;
             }
@@ -208,7 +209,7 @@ impl RecoveryTimeline {
                 if let Some(mime) = &file.metadata.mime_type {
                     type_deletions
                         .entry(mime.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(file.id);
                 }
             }
@@ -243,10 +244,7 @@ impl RecoveryTimeline {
     }
 
     /// Calculate timeline statistics
-    fn calculate_statistics(
-        events: &[TimelineEntry],
-        files: &[DeletedFile],
-    ) -> TimelineStatistics {
+    fn calculate_statistics(events: &[TimelineEntry], files: &[DeletedFile]) -> TimelineStatistics {
         let deletion_events: Vec<_> = events
             .iter()
             .filter(|e| matches!(e.event_type, TimelineEventType::FileDeleted))
@@ -411,12 +409,21 @@ mod tests {
     #[test]
     fn test_empty_timeline() {
         let session = RecoverySession {
-            session_id: uuid::Uuid::new_v4(),
+            id: uuid::Uuid::new_v4(),
             device_path: PathBuf::from("/dev/test"),
-            filesystem_type: "xfs".to_string(),
-            scan_start_time: Utc::now(),
-            scan_end_time: Some(Utc::now()),
+            fs_type: crate::FileSystemType::Xfs,
+            created_at: Utc::now(),
             scan_results: vec![],
+            total_scanned: 0,
+            confidence_threshold: 0.5,
+            metadata: crate::SessionMetadata {
+                device_size: 1024 * 1024 * 1024,
+                filesystem_size: 1024 * 1024 * 1024,
+                block_size: 4096,
+                scan_duration_ms: 0,
+                files_found: 0,
+                recoverable_files: 0,
+            },
         };
 
         let timeline = RecoveryTimeline::from_session(&session);
@@ -478,12 +485,21 @@ mod tests {
         ];
 
         let session = RecoverySession {
-            session_id: uuid::Uuid::new_v4(),
+            id: uuid::Uuid::new_v4(),
             device_path: PathBuf::from("/dev/test"),
-            filesystem_type: "xfs".to_string(),
-            scan_start_time: now,
-            scan_end_time: Some(now),
+            fs_type: crate::FileSystemType::Xfs,
+            created_at: now,
             scan_results: files,
+            total_scanned: 2,
+            confidence_threshold: 0.5,
+            metadata: crate::SessionMetadata {
+                device_size: 1024 * 1024 * 1024,
+                filesystem_size: 1024 * 1024 * 1024,
+                block_size: 4096,
+                scan_duration_ms: 100,
+                files_found: 2,
+                recoverable_files: 2,
+            },
         };
 
         let timeline = RecoveryTimeline::from_session(&session);
@@ -491,18 +507,30 @@ mod tests {
         // Should have creation, modification, and deletion events for each file
         assert!(timeline.events.len() >= 2); // At least deletion events
         assert_eq!(timeline.statistics.deletion_events, 2);
-        assert!(timeline.statistics.file_types_affected.contains_key("text/plain"));
+        assert!(timeline
+            .statistics
+            .file_types_affected
+            .contains_key("text/plain"));
     }
 
     #[test]
     fn test_csv_export() {
         let session = RecoverySession {
-            session_id: uuid::Uuid::new_v4(),
+            id: uuid::Uuid::new_v4(),
             device_path: PathBuf::from("/dev/test"),
-            filesystem_type: "xfs".to_string(),
-            scan_start_time: Utc::now(),
-            scan_end_time: Some(Utc::now()),
+            fs_type: crate::FileSystemType::Xfs,
+            created_at: Utc::now(),
             scan_results: vec![],
+            total_scanned: 0,
+            confidence_threshold: 0.5,
+            metadata: crate::SessionMetadata {
+                device_size: 1024 * 1024 * 1024,
+                filesystem_size: 1024 * 1024 * 1024,
+                block_size: 4096,
+                scan_duration_ms: 0,
+                files_found: 0,
+                recoverable_files: 0,
+            },
         };
 
         let timeline = RecoveryTimeline::from_session(&session);

@@ -4,6 +4,11 @@ pub mod directory;
 pub mod engine;
 pub mod signatures;
 
+// Fragment reassembly modules
+pub mod fragment_matcher;
+pub mod fragments;
+pub mod reassembly;
+
 pub use confidence::{
     calculate_confidence_score, generate_confidence_report, ActivityLevel, ConfidenceContext,
     ConfidenceReport, RecoveryRecommendation,
@@ -23,3 +28,7 @@ pub use directory::{
     BtrfsDirEntry, BtrfsDirReconstructor, DirectoryReconstructor, ExFatDirEntry,
     ExFatDirReconstructor, ReconstructionStats, XfsDirEntry, XfsDirReconstructor,
 };
+
+pub use fragment_matcher::{calculate_entropy, FragmentMatcher, MatchScore};
+pub use fragments::{Fragment, FragmentCatalog, FragmentId};
+pub use reassembly::{GapInfo, ReassemblyEngine, ReassemblyResult, ReassemblyStatistics};

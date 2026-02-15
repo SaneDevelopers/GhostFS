@@ -219,11 +219,11 @@ mod tests {
 
     #[test]
     fn test_fat_entry_constants() {
+        // Verify FAT entry marker values
         assert_eq!(FAT_ENTRY_FREE, 0);
         assert_eq!(FAT_ENTRY_BAD, 0xFFFFFFF7);
-        assert!(FAT_ENTRY_EOC_MIN >= 0xFFFFFFF8);
-        // Ensure EOC_MIN is less than or equal to EOC_MAX
-        assert!(FAT_ENTRY_EOC_MIN <= FAT_ENTRY_EOC_MAX);
+        assert_eq!(FAT_ENTRY_EOC_MIN, 0xFFFFFFF8);
+        assert_eq!(FAT_ENTRY_EOC_MAX, 0xFFFFFFFF);
     }
 
     #[test]

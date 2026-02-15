@@ -261,7 +261,11 @@ impl RecoveryTimeline {
         let peak_deletion_time = hourly_deletions
             .iter()
             .max_by_key(|(_, count)| *count)
-            .and_then(|(hour, _)| DateTime::from_timestamp(*hour * 3600, 0));
+            .and_then(|(hour, _)| {
+                // Use checked_mul to prevent overflow for very large hour values
+                hour.checked_mul(3600)
+                    .and_then(|ts| DateTime::from_timestamp(ts, 0))
+            });
 
         // Calculate average deletions per day
         let avg_deletions_per_day = if deletion_events.len() > 1 {

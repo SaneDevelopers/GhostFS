@@ -177,8 +177,10 @@ fn get_xfs_config_for_scan(
     // Prompt user only if filesystem is large (>100GB) and interactive mode
     if interactive && total_size_gb > 100.0 {
         if let Ok(Some(custom_blocks)) = prompt_scan_limit(total_blocks, block_size) {
-            let mut config = XfsRecoveryConfig::default();
-            config.max_scan_blocks = Some(custom_blocks);
+            let config = XfsRecoveryConfig {
+                max_scan_blocks: Some(custom_blocks),
+                ..Default::default()
+            };
             return Ok(Some(config));
         }
     }

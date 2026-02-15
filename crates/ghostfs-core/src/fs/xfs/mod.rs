@@ -1566,7 +1566,7 @@ mod tests {
         assert_eq!(metadata.ag_number, 1);
         assert_eq!(metadata.extent_count, 2);
         assert_eq!(metadata.extent_format, crate::XfsExtentFormat::Extents);
-        assert_eq!(metadata.is_aligned, true); // Both extents are aligned
+        assert!(metadata.is_aligned); // Both extents are aligned
         assert_eq!(metadata.last_link_count, 2);
         assert_eq!(metadata.inode_generation, 12345);
     }
@@ -1592,7 +1592,7 @@ mod tests {
         let metadata =
             engine.extract_xfs_metadata(0, 100, XFS_DINODE_FMT_EXTENTS, 1, 100, &data_blocks, 4096);
 
-        assert_eq!(metadata.is_aligned, false); // Should detect misalignment
+        assert!(!metadata.is_aligned); // Should detect misalignment
     }
 
     #[test]

@@ -230,15 +230,13 @@ impl<'a> ExFatRecoveryEngine<'a> {
             return Ok(entries);
         }
 
-        if let Ok(entry) = DirectoryEntry::parse(&data[offset..]) {
-            if let DirectoryEntry::File(ref f) = entry {
-                let count = f.secondary_count as usize + 1;
-                for i in 0..count {
-                    let start = i * ENTRY_SIZE;
-                    if start + ENTRY_SIZE <= data.len() {
-                        if let Ok(e) = DirectoryEntry::parse(&data[start..]) {
-                            entries.push(e);
-                        }
+        if let Ok(DirectoryEntry::File(ref f)) = DirectoryEntry::parse(&data[offset..]) {
+            let count = f.secondary_count as usize + 1;
+            for i in 0..count {
+                let start = i * ENTRY_SIZE;
+                if start + ENTRY_SIZE <= data.len() {
+                    if let Ok(e) = DirectoryEntry::parse(&data[start..]) {
+                        entries.push(e);
                     }
                 }
             }
@@ -518,8 +516,8 @@ impl<'a> ExFatRecoveryEngine<'a> {
             first_offset
         );
 
-        for i in 1..chain.len() {
-            let current_offset = self.fat_table.cluster_offset(chain[i]);
+        for &cluster in &chain[1..] {
+            let current_offset = self.fat_table.cluster_offset(cluster);
 
             if current_offset == start_offset + byte_count {
                 // Contiguous - extend the range

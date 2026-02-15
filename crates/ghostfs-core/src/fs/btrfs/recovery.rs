@@ -4,6 +4,7 @@
 /// 1. Parsing the FS tree for inodes
 /// 2. Looking for orphan items (deleted but not yet cleaned)
 /// 3. Scanning for unlinked files
+/// 4. Scanning directory entries for filename recovery
 use anyhow::{bail, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use chrono::{DateTime, Utc};

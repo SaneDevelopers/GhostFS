@@ -289,13 +289,13 @@ fn calculate_xfs_ag_validity(meta: &crate::XfsFileMetadata) -> f32 {
 
     // Factor 1: Generation counter is reasonable (not corrupted)
     // XFS generation counters typically don't exceed millions
-    if meta.inode_generation > 0 && meta.inode_generation < XFS_MAX_REASONABLE_GENERATION {
+    if meta.inode_generation > 0 && (meta.inode_generation as u64) < XFS_MAX_REASONABLE_GENERATION {
         score += 0.33;
     }
 
     // Factor 2: AG inode number is reasonable
     // Most filesystems have millions of inodes per AG, not billions
-    if meta.ag_inode_number < XFS_MAX_REASONABLE_AG_INODE_NUMBER {
+    if (meta.ag_inode_number as u64) < XFS_MAX_REASONABLE_AG_INODE_NUMBER {
         score += 0.33;
     }
 

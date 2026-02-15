@@ -137,8 +137,20 @@ enum Commands {
         #[arg(long)]
         no_interactive: bool,
     },
-    /// Show a timeline (stub for now)
-    Timeline,
+    /// Show a timeline of file deletion activity
+    Timeline {
+        /// Path to image file (required to generate timeline)
+        image: PathBuf,
+        /// Filesystem type
+        #[arg(long, value_parser = ["xfs", "btrfs", "exfat"], default_value = "xfs")]
+        fs: String,
+        /// Export timeline to JSON file
+        #[arg(long)]
+        json: Option<PathBuf>,
+        /// Export timeline to CSV file
+        #[arg(long)]
+        csv: Option<PathBuf>,
+    },
 }
 
 /// Get XFS recovery config with optional user prompts for large filesystems
@@ -376,9 +388,72 @@ fn main() -> Result<()> {
                 println!("Recovery completed! Files saved to: {}", out.display());
             }
         }
-        Commands::Timeline => {
-            println!("Timeline analysis");
-            println!("Timeline functionality not yet implemented");
+        Commands::Timeline { image, fs, json, csv } => {
+            println!("📅 Generating Recovery Timeline...\n");
+
+            let fs_type = match fs.as_str() {
+                "xfs" => FileSystemType::Xfs,
+                "btrfs" => FileSystemType::Btrfs,
+                "exfat" => FileSystemType::ExFat,
+                _ => unreachable!(),
+            };
+
+            // Perform scan to get recovery session
+            println!("🔍 Scanning {} filesystem...", fs_type);
+            let session = match ghostfs_core::scan_and_analyze(&image, fs_type) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("❌ Failed to scan image: {}", e);
+                    return Err(e);
+                }
+            };
+
+            println!("✅ Scan complete: {} files found\n", session.scan_results.len());
+
+            // Generate timeline
+            use ghostfs_core::RecoveryTimeline;
+            let timeline = RecoveryTimeline::from_session(&session);
+
+            // Display text report
+            println!("{}", timeline.to_text_report());
+
+            // Export to JSON if requested
+            if let Some(ref json_path) = json {
+                match timeline.to_json() {
+                    Ok(json_data) => {
+                        if let Err(e) = std::fs::write(json_path, json_data) {
+                            eprintln!("⚠️  Failed to write JSON file: {}", e);
+                        } else {
+                            println!("\n💾 Timeline saved to: {}", json_path.display());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  Failed to serialize timeline to JSON: {}", e);
+                    }
+                }
+            }
+
+            // Export to CSV if requested
+            if let Some(ref csv_path) = csv {
+                let csv_data = timeline.to_csv();
+                if let Err(e) = std::fs::write(csv_path, csv_data) {
+                    eprintln!("⚠️  Failed to write CSV file: {}", e);
+                } else {
+                    println!("💾 Timeline saved to: {}", csv_path.display());
+                }
+            }
+
+            // Provide helpful next steps
+            if !timeline.events.is_empty() {
+                println!("\n💡 Next Steps:");
+                println!("   • Use 'ghostfs recover' to restore files");
+                if !timeline.patterns.is_empty() {
+                    println!("   • Review suspicious patterns above for forensic analysis");
+                }
+                if json.is_none() && csv.is_none() {
+                    println!("   • Add --json or --csv flags to export timeline data");
+                }
+            }
         }
     }
     Ok(())

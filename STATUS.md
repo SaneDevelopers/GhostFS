@@ -138,6 +138,7 @@ GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file syst
 - ✅ **Strategy pattern** - Extensible recovery strategies
 - ✅ **Confidence calculation** - Advanced scoring system with FS-specific factors
 - ✅ **File validation** - Signature-based verification
+- ✅ **Directory reconstruction** - Full path recovery for all filesystems (NEW)
 
 ### Confidence Scoring System (`recovery/confidence.rs`) - **✅ COMPLETE**
 
@@ -166,6 +167,30 @@ GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file syst
 - ✅ **Threshold filtering** - User-configurable confidence levels
 - ✅ **Comprehensive tests** - 4 new tests for Btrfs and exFAT confidence scoring (42 total tests)
 
+### Directory Reconstruction (`recovery/directory/`) - **✅ COMPLETE**
+
+- ✅ **DirectoryReconstructor trait** - Common interface for all filesystems
+- ✅ **XFS directory reconstruction** (`xfs.rs`):
+  - XFS v2/v3 directory block parsing
+  - Short/block/leaf format support
+  - Parent-child inode relationship tracking
+  - Auto-detection of root inode (64 or 128)
+  - Full path reconstruction from inode chains
+  - Integration with XFS recovery engine
+- ✅ **Btrfs directory reconstruction** (`btrfs.rs`):
+  - B-tree DIR_ITEM and INODE_REF parsing
+  - Parent inode tracking
+  - Path building from root (inode 256)
+  - Integration with Btrfs recovery engine
+- ✅ **exFAT directory reconstruction** (`exfat.rs`):
+  - Multi-entry file set parsing (File + Stream + Name entries)
+  - UTF-16 filename decoding
+  - Cluster-based parent tracking
+  - Recursive directory chain scanning
+  - Integration with exFAT recovery engine
+- ✅ **Integration tests** - 4 comprehensive tests for path reconstruction
+- ✅ **Recovery engine integration** - All filesystems enhanced with path reconstruction
+
 ### CLI Tool (`ghostfs-cli`)
 
 - ✅ **Command structure** - Well-organized clap-based CLI
@@ -186,12 +211,14 @@ GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file syst
 
 - ✅ **Test data scripts** - Shell scripts for creating test images
 - ✅ **Build tasks** - VS Code tasks for common operations
-- ✅ **Example scripts** - Reference usage in `info.txt`
+- ✅ **Example scripts** - Reference usage in `info.txt` and `examples/basic_scan.rs`
 - ✅ **Documentation** - Comprehensive README with usage examples
-- ✅ **Unit tests** - 30 passing tests across all modules:
+- ✅ **Unit tests** - 53 passing tests across all modules:
   - 6 Btrfs tests (key parsing, timespec, inode mode, header, tree traversal)
   - 9 exFAT tests (FAT, directory entries, UTF-16, signatures)
-  - 15 common tests (signatures, confidence, types)
+  - 14 XFS tests (superblock, inodes, extents, AG calculations, metadata)
+  - 20 common tests (signatures, confidence, types)
+  - 4 directory reconstruction integration tests (NEW)
 - ✅ **Integration testing** - End-to-end recovery verified:
   - XFS: 2 files recovered successfully
   - Btrfs: 3 files recovered successfully
@@ -246,6 +273,65 @@ GhostFS is a professional data recovery tool for XFS, Btrfs, and exFAT file syst
 - Cluster allocation verification
 - UTF-16 encoding validation
 - Boot sector checksum
+
+### Advanced XFS Features (Planned for Future)
+
+**Status**: ⚠️ **PARTIALLY IMPLEMENTED** - Config exists, directory reconstruction missing
+
+**Priority**: Medium (Post v1.0)
+
+**Estimated Effort**: 3-4 days (only metadata module needed)
+
+#### ✅ Already Implemented in Dev Branch:
+
+1. **XfsRecoveryConfig System** (✅ COMPLETE)
+   - Location: `crates/ghostfs-core/src/fs/xfs/mod.rs` lines 19-68
+   - Adaptive scanning configuration based on FS size
+   - Configurable scan limits and thresholds
+   - Text detection settings (75% threshold, 4KB sample)
+   - Performance tuning options
+   - Already integrated with XfsRecoveryEngine
+   - **9 usages throughout the codebase** - fully functional
+
+2. **Basic Filename Generation** (✅ COMPLETE)
+   - Location: `crates/ghostfs-core/src/fs/xfs/mod.rs` lines 1084-1100
+   - Generic filename generation (e.g., `inode_12345.jpg`)
+   - Extension detection from file signatures
+   - Type-based defaults (dir, link, bin)
+
+#### ❌ Still Missing - Directory Reconstruction:
+
+1. **XFS Directory Parser** (3-4 days)
+   - `XfsDirParser` module - Parse XFS directory blocks
+   - `XfsAttrParser` module - Extract extended attributes  
+   - `DirReconstructor` - Rebuild directory tree from scattered blocks
+   - **Files to create**:
+     - `crates/ghostfs-core/src/fs/xfs/metadata.rs` (or `metadata/` folder)
+     - Contains: XfsDirParser, XfsAttrParser, DirReconstructor structs
+   
+2. **Enhanced Filename Recovery** (1 day)
+   - Update `generate_filename()` to use directory reconstructor
+   - Path reconstruction from inode-to-parent relationships
+   - Original filename extraction from directory blocks
+   - Fallback to current generic names when dir data unavailable
+
+#### Implementation Plan:
+- [x] Phase 1: XfsRecoveryConfig (DONE - already in dev)
+- [ ] Phase 2: Design metadata module API
+- [ ] Phase 3: Implement XfsDirParser (directory block parsing)
+- [ ] Phase 4: Implement XfsAttrParser (extended attributes)
+- [ ] Phase 5: Implement DirReconstructor (tree building)
+- [ ] Phase 6: Update generate_filename() to use reconstructor
+- [ ] Phase 7: Add comprehensive tests
+- [ ] Phase 8: Update documentation
+
+#### Benefits:
+- ✅ Recover original filenames instead of generic `inode_12345.jpg`
+- ✅ Reconstruct full directory paths (e.g., `/home/user/photos/vacation.jpg`)
+- ✅ Better user experience (meaningful file names)
+- ✅ Forensics value (preserve directory structure)
+
+**Note**: XfsRecoveryConfig is already fully working. Only the metadata module needs to be built from scratch.
 
 ### Metadata Extraction TODOs
 

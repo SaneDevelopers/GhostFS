@@ -16,189 +16,195 @@ pub fn init_signature_database() -> HashMap<String, Vec<FileSignature>> {
     let mut signatures = HashMap::new();
 
     // Image formats
-    let mut image_sigs = Vec::new();
-    image_sigs.push(FileSignature {
-        signature: vec![0xFF, 0xD8, 0xFF],
-        offset: 0,
-        mime_type: "image/jpeg".to_string(),
-        extensions: vec!["jpg".to_string(), "jpeg".to_string()],
-        description: "JPEG Image".to_string(),
-    });
-    image_sigs.push(FileSignature {
-        signature: vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
-        offset: 0,
-        mime_type: "image/png".to_string(),
-        extensions: vec!["png".to_string()],
-        description: "PNG Image".to_string(),
-    });
-    image_sigs.push(FileSignature {
-        signature: vec![0x47, 0x49, 0x46, 0x38, 0x37, 0x61], // GIF87a
-        offset: 0,
-        mime_type: "image/gif".to_string(),
-        extensions: vec!["gif".to_string()],
-        description: "GIF Image (87a)".to_string(),
-    });
-    image_sigs.push(FileSignature {
-        signature: vec![0x47, 0x49, 0x46, 0x38, 0x39, 0x61], // GIF89a
-        offset: 0,
-        mime_type: "image/gif".to_string(),
-        extensions: vec!["gif".to_string()],
-        description: "GIF Image (89a)".to_string(),
-    });
-    image_sigs.push(FileSignature {
-        signature: vec![0x42, 0x4D], // BM
-        offset: 0,
-        mime_type: "image/bmp".to_string(),
-        extensions: vec!["bmp".to_string()],
-        description: "Windows Bitmap".to_string(),
-    });
+    let image_sigs = vec![
+        FileSignature {
+            signature: vec![0xFF, 0xD8, 0xFF],
+            offset: 0,
+            mime_type: "image/jpeg".to_string(),
+            extensions: vec!["jpg".to_string(), "jpeg".to_string()],
+            description: "JPEG Image".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+            offset: 0,
+            mime_type: "image/png".to_string(),
+            extensions: vec!["png".to_string()],
+            description: "PNG Image".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x47, 0x49, 0x46, 0x38, 0x37, 0x61], // GIF87a
+            offset: 0,
+            mime_type: "image/gif".to_string(),
+            extensions: vec!["gif".to_string()],
+            description: "GIF Image (87a)".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x47, 0x49, 0x46, 0x38, 0x39, 0x61], // GIF89a
+            offset: 0,
+            mime_type: "image/gif".to_string(),
+            extensions: vec!["gif".to_string()],
+            description: "GIF Image (89a)".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x42, 0x4D], // BM
+            offset: 0,
+            mime_type: "image/bmp".to_string(),
+            extensions: vec!["bmp".to_string()],
+            description: "Windows Bitmap".to_string(),
+        },
+    ];
     signatures.insert("image".to_string(), image_sigs);
 
     // Video formats
-    let mut video_sigs = Vec::new();
-    video_sigs.push(FileSignature {
-        signature: vec![0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70], // ftyp
-        offset: 4,
-        mime_type: "video/mp4".to_string(),
-        extensions: vec!["mp4".to_string(), "m4v".to_string()],
-        description: "MPEG-4 Video".to_string(),
-    });
-    video_sigs.push(FileSignature {
-        signature: vec![0x46, 0x4C, 0x56, 0x01], // FLV
-        offset: 0,
-        mime_type: "video/x-flv".to_string(),
-        extensions: vec!["flv".to_string()],
-        description: "Flash Video".to_string(),
-    });
-    video_sigs.push(FileSignature {
-        signature: vec![0x1A, 0x45, 0xDF, 0xA3], // EBML
-        offset: 0,
-        mime_type: "video/webm".to_string(),
-        extensions: vec!["webm".to_string(), "mkv".to_string()],
-        description: "WebM/Matroska Video".to_string(),
-    });
+    let video_sigs = vec![
+        FileSignature {
+            signature: vec![0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70], // ftyp
+            offset: 4,
+            mime_type: "video/mp4".to_string(),
+            extensions: vec!["mp4".to_string(), "m4v".to_string()],
+            description: "MPEG-4 Video".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x46, 0x4C, 0x56, 0x01], // FLV
+            offset: 0,
+            mime_type: "video/x-flv".to_string(),
+            extensions: vec!["flv".to_string()],
+            description: "Flash Video".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x1A, 0x45, 0xDF, 0xA3], // EBML
+            offset: 0,
+            mime_type: "video/webm".to_string(),
+            extensions: vec!["webm".to_string(), "mkv".to_string()],
+            description: "WebM/Matroska Video".to_string(),
+        },
+    ];
     signatures.insert("video".to_string(), video_sigs);
 
     // Audio formats
-    let mut audio_sigs = Vec::new();
-    audio_sigs.push(FileSignature {
-        signature: vec![0xFF, 0xFB], // MP3 Frame sync
-        offset: 0,
-        mime_type: "audio/mpeg".to_string(),
-        extensions: vec!["mp3".to_string()],
-        description: "MP3 Audio".to_string(),
-    });
-    audio_sigs.push(FileSignature {
-        signature: vec![0x49, 0x44, 0x33], // ID3
-        offset: 0,
-        mime_type: "audio/mpeg".to_string(),
-        extensions: vec!["mp3".to_string()],
-        description: "MP3 Audio with ID3".to_string(),
-    });
-    audio_sigs.push(FileSignature {
-        signature: vec![0x66, 0x4C, 0x61, 0x43], // fLaC
-        offset: 0,
-        mime_type: "audio/flac".to_string(),
-        extensions: vec!["flac".to_string()],
-        description: "FLAC Audio".to_string(),
-    });
-    audio_sigs.push(FileSignature {
-        signature: vec![0x4F, 0x67, 0x67, 0x53], // OggS
-        offset: 0,
-        mime_type: "audio/ogg".to_string(),
-        extensions: vec!["ogg".to_string(), "oga".to_string()],
-        description: "Ogg Audio".to_string(),
-    });
+    let audio_sigs = vec![
+        FileSignature {
+            signature: vec![0xFF, 0xFB], // MP3 Frame sync
+            offset: 0,
+            mime_type: "audio/mpeg".to_string(),
+            extensions: vec!["mp3".to_string()],
+            description: "MP3 Audio".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x49, 0x44, 0x33], // ID3
+            offset: 0,
+            mime_type: "audio/mpeg".to_string(),
+            extensions: vec!["mp3".to_string()],
+            description: "MP3 Audio with ID3".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x66, 0x4C, 0x61, 0x43], // fLaC
+            offset: 0,
+            mime_type: "audio/flac".to_string(),
+            extensions: vec!["flac".to_string()],
+            description: "FLAC Audio".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x4F, 0x67, 0x67, 0x53], // OggS
+            offset: 0,
+            mime_type: "audio/ogg".to_string(),
+            extensions: vec!["ogg".to_string(), "oga".to_string()],
+            description: "Ogg Audio".to_string(),
+        },
+    ];
     signatures.insert("audio".to_string(), audio_sigs);
 
     // Document formats
-    let mut document_sigs = Vec::new();
-    document_sigs.push(FileSignature {
-        signature: vec![0x25, 0x50, 0x44, 0x46], // %PDF
-        offset: 0,
-        mime_type: "application/pdf".to_string(),
-        extensions: vec!["pdf".to_string()],
-        description: "PDF Document".to_string(),
-    });
-    document_sigs.push(FileSignature {
-        signature: vec![0x50, 0x4B, 0x03, 0x04], // PK (ZIP-based)
-        offset: 0,
-        mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            .to_string(),
-        extensions: vec!["docx".to_string(), "xlsx".to_string(), "pptx".to_string()],
-        description: "Microsoft Office Document".to_string(),
-    });
-    document_sigs.push(FileSignature {
-        signature: vec![0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1], // OLE
-        offset: 0,
-        mime_type: "application/msword".to_string(),
-        extensions: vec!["doc".to_string(), "xls".to_string(), "ppt".to_string()],
-        description: "Microsoft Office Legacy Document".to_string(),
-    });
+    let document_sigs = vec![
+        FileSignature {
+            signature: vec![0x25, 0x50, 0x44, 0x46], // %PDF
+            offset: 0,
+            mime_type: "application/pdf".to_string(),
+            extensions: vec!["pdf".to_string()],
+            description: "PDF Document".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x50, 0x4B, 0x03, 0x04], // PK (ZIP-based)
+            offset: 0,
+            mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                .to_string(),
+            extensions: vec!["docx".to_string(), "xlsx".to_string(), "pptx".to_string()],
+            description: "Microsoft Office Document".to_string(),
+        },
+        FileSignature {
+            signature: vec![0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1], // OLE
+            offset: 0,
+            mime_type: "application/msword".to_string(),
+            extensions: vec!["doc".to_string(), "xls".to_string(), "ppt".to_string()],
+            description: "Microsoft Office Legacy Document".to_string(),
+        },
+    ];
     signatures.insert("document".to_string(), document_sigs);
 
     // Archive formats
-    let mut archive_sigs = Vec::new();
-    archive_sigs.push(FileSignature {
-        signature: vec![0x50, 0x4B, 0x03, 0x04], // ZIP
-        offset: 0,
-        mime_type: "application/zip".to_string(),
-        extensions: vec!["zip".to_string()],
-        description: "ZIP Archive".to_string(),
-    });
-    archive_sigs.push(FileSignature {
-        signature: vec![0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00], // Rar!
-        offset: 0,
-        mime_type: "application/vnd.rar".to_string(),
-        extensions: vec!["rar".to_string()],
-        description: "RAR Archive".to_string(),
-    });
-    archive_sigs.push(FileSignature {
-        signature: vec![0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C], // 7z
-        offset: 0,
-        mime_type: "application/x-7z-compressed".to_string(),
-        extensions: vec!["7z".to_string()],
-        description: "7-Zip Archive".to_string(),
-    });
-    archive_sigs.push(FileSignature {
-        signature: vec![0x1F, 0x8B, 0x08], // GZIP
-        offset: 0,
-        mime_type: "application/gzip".to_string(),
-        extensions: vec!["gz".to_string(), "gzip".to_string()],
-        description: "GZIP Archive".to_string(),
-    });
+    let archive_sigs = vec![
+        FileSignature {
+            signature: vec![0x50, 0x4B, 0x03, 0x04], // ZIP
+            offset: 0,
+            mime_type: "application/zip".to_string(),
+            extensions: vec!["zip".to_string()],
+            description: "ZIP Archive".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00], // Rar!
+            offset: 0,
+            mime_type: "application/vnd.rar".to_string(),
+            extensions: vec!["rar".to_string()],
+            description: "RAR Archive".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C], // 7z
+            offset: 0,
+            mime_type: "application/x-7z-compressed".to_string(),
+            extensions: vec!["7z".to_string()],
+            description: "7-Zip Archive".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x1F, 0x8B, 0x08], // GZIP
+            offset: 0,
+            mime_type: "application/gzip".to_string(),
+            extensions: vec!["gz".to_string(), "gzip".to_string()],
+            description: "GZIP Archive".to_string(),
+        },
+    ];
     signatures.insert("archive".to_string(), archive_sigs);
 
     // Executable formats
-    let mut executable_sigs = Vec::new();
-    executable_sigs.push(FileSignature {
-        signature: vec![0x4D, 0x5A], // MZ (Windows PE)
-        offset: 0,
-        mime_type: "application/vnd.microsoft.portable-executable".to_string(),
-        extensions: vec!["exe".to_string(), "dll".to_string(), "sys".to_string()],
-        description: "Windows Executable".to_string(),
-    });
-    executable_sigs.push(FileSignature {
-        signature: vec![0x7F, 0x45, 0x4C, 0x46], // ELF
-        offset: 0,
-        mime_type: "application/x-executable".to_string(),
-        extensions: vec!["elf".to_string(), "so".to_string()],
-        description: "Linux Executable".to_string(),
-    });
-    executable_sigs.push(FileSignature {
-        signature: vec![0xFE, 0xED, 0xFA, 0xCE], // Mach-O 32-bit
-        offset: 0,
-        mime_type: "application/x-mach-binary".to_string(),
-        extensions: vec!["dylib".to_string()],
-        description: "macOS Executable (32-bit)".to_string(),
-    });
-    executable_sigs.push(FileSignature {
-        signature: vec![0xFE, 0xED, 0xFA, 0xCF], // Mach-O 64-bit
-        offset: 0,
-        mime_type: "application/x-mach-binary".to_string(),
-        extensions: vec!["dylib".to_string()],
-        description: "macOS Executable (64-bit)".to_string(),
-    });
+    let executable_sigs = vec![
+        FileSignature {
+            signature: vec![0x4D, 0x5A], // MZ (Windows PE)
+            offset: 0,
+            mime_type: "application/vnd.microsoft.portable-executable".to_string(),
+            extensions: vec!["exe".to_string(), "dll".to_string(), "sys".to_string()],
+            description: "Windows Executable".to_string(),
+        },
+        FileSignature {
+            signature: vec![0x7F, 0x45, 0x4C, 0x46], // ELF
+            offset: 0,
+            mime_type: "application/x-executable".to_string(),
+            extensions: vec!["elf".to_string(), "so".to_string()],
+            description: "Linux Executable".to_string(),
+        },
+        FileSignature {
+            signature: vec![0xFE, 0xED, 0xFA, 0xCE], // Mach-O 32-bit
+            offset: 0,
+            mime_type: "application/x-mach-binary".to_string(),
+            extensions: vec!["dylib".to_string()],
+            description: "macOS Executable (32-bit)".to_string(),
+        },
+        FileSignature {
+            signature: vec![0xFE, 0xED, 0xFA, 0xCF], // Mach-O 64-bit
+            offset: 0,
+            mime_type: "application/x-mach-binary".to_string(),
+            extensions: vec!["dylib".to_string()],
+            description: "macOS Executable (64-bit)".to_string(),
+        },
+    ];
     signatures.insert("executable".to_string(), executable_sigs);
 
     signatures
@@ -328,9 +334,9 @@ fn validate_png_structure(data: &[u8]) -> f32 {
 
     // Look for other common PNG chunks
     let chunks = [b"IDAT", b"IEND", b"tEXt", b"gAMA"];
-    for chunk in &chunks {
+    for chunk in chunks {
         for i in 0..data.len().saturating_sub(4) {
-            if &data[i..i + 4] == *chunk {
+            if &data[i..i + 4] == chunk {
                 confidence += 0.05;
                 break;
             }

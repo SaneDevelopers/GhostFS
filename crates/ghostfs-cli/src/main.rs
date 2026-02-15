@@ -136,9 +136,39 @@ enum Commands {
         /// Disable interactive prompts (for CI/automation)
         #[arg(long)]
         no_interactive: bool,
+        /// Enable forensics mode with audit trail
+        #[arg(long)]
+        forensics: bool,
+        /// Enable audit trail logging (creates audit.jsonl)
+        #[arg(long)]
+        audit: bool,
+        /// Enable hash verification (creates hash_manifest.json)
+        #[arg(long)]
+        verify_hash: bool,
+        /// Hash algorithm for verification (sha256, sha512, sha1, md5)
+        #[arg(long, default_value = "sha256")]
+        hash_algorithm: String,
+        /// Enable partial file recovery
+        #[arg(long)]
+        partial: bool,
+        /// Enable smart extent reconstruction
+        #[arg(long)]
+        reconstruct: bool,
     },
-    /// Show a timeline (stub for now)
-    Timeline,
+    /// Show a timeline of file deletion activity
+    Timeline {
+        /// Path to image file (required to generate timeline)
+        image: PathBuf,
+        /// Filesystem type
+        #[arg(long, value_parser = ["xfs", "btrfs", "exfat"], default_value = "xfs")]
+        fs: String,
+        /// Export timeline to JSON file
+        #[arg(long)]
+        json: Option<PathBuf>,
+        /// Export timeline to CSV file
+        #[arg(long)]
+        csv: Option<PathBuf>,
+    },
 }
 
 /// Get XFS recovery config with optional user prompts for large filesystems
@@ -165,8 +195,10 @@ fn get_xfs_config_for_scan(
     // Prompt user only if filesystem is large (>100GB) and interactive mode
     if interactive && total_size_gb > 100.0 {
         if let Ok(Some(custom_blocks)) = prompt_scan_limit(total_blocks, block_size) {
-            let mut config = XfsRecoveryConfig::default();
-            config.max_scan_blocks = Some(custom_blocks);
+            let config = XfsRecoveryConfig {
+                max_scan_blocks: Some(custom_blocks),
+                ..Default::default()
+            };
             return Ok(Some(config));
         }
     }
@@ -289,6 +321,12 @@ fn main() -> Result<()> {
             out,
             ids,
             no_interactive,
+            forensics,
+            audit,
+            verify_hash,
+            hash_algorithm,
+            partial,
+            reconstruct,
         } => {
             println!("Starting recovery process for: {}", image.display());
             println!("Output directory: {}", out.display());
@@ -329,56 +367,254 @@ fn main() -> Result<()> {
                 session.metadata.recoverable_files
             );
 
-            // Perform recovery
-            println!("Starting file recovery...");
-            let recovery_report = match ids {
-                Some(file_ids) => {
-                    println!("Recovering specific files: {:?}", file_ids);
-                    // Convert String IDs to u64 IDs
-                    let file_ids_u64: Vec<u64> =
-                        file_ids.iter().filter_map(|id| id.parse().ok()).collect();
-                    ghostfs_core::recover_files(&image, &session, &out, Some(file_ids_u64))?
+            // Determine if forensics mode is enabled
+            let use_forensics = forensics || audit || verify_hash || partial || reconstruct;
+
+            if use_forensics {
+                println!("\n🔒 Forensics mode enabled:");
+                if forensics || audit {
+                    println!("   • Audit trail logging");
                 }
-                None => {
-                    println!("Recovering all recoverable files...");
-                    ghostfs_core::recover_files(&image, &session, &out, None)?
+                if forensics || verify_hash {
+                    let algo = match hash_algorithm.as_str() {
+                        "sha256" => ghostfs_core::HashAlgorithm::SHA256,
+                        "sha512" => ghostfs_core::HashAlgorithm::SHA512,
+                        "sha1" => ghostfs_core::HashAlgorithm::SHA1,
+                        "md5" => ghostfs_core::HashAlgorithm::MD5,
+                        _ => {
+                            eprintln!("Invalid hash algorithm: {}", hash_algorithm);
+                            std::process::exit(1);
+                        }
+                    };
+                    println!("   • Hash verification ({})", hash_algorithm.to_uppercase());
+                }
+                if partial {
+                    println!("   • Partial file recovery");
+                }
+                if reconstruct {
+                    println!("   • Smart extent reconstruction");
+                }
+                println!();
+            }
+
+            // Perform recovery with or without forensics
+            println!("Starting file recovery...");
+
+            let file_ids_u64: Option<Vec<u64>> = ids.as_ref().map(|ids_vec| {
+                ids_vec.iter().filter_map(|id| id.parse().ok()).collect()
+            });
+
+            if use_forensics {
+                // Build forensics config
+                let mut config = if forensics {
+                    ghostfs_core::ForensicsConfig::full_forensics(&out)
+                } else {
+                    ghostfs_core::ForensicsConfig::default()
+                };
+
+                if !forensics {
+                    // Apply individual flags
+                    if audit {
+                        config.enable_audit = true;
+                        config.audit_log_path = Some(out.join("audit.jsonl"));
+                    }
+                    if verify_hash {
+                        config.enable_hash_verification = true;
+                        config.hash_algorithm = match hash_algorithm.as_str() {
+                            "sha256" => ghostfs_core::HashAlgorithm::SHA256,
+                            "sha512" => ghostfs_core::HashAlgorithm::SHA512,
+                            "sha1" => ghostfs_core::HashAlgorithm::SHA1,
+                            "md5" => ghostfs_core::HashAlgorithm::MD5,
+                            _ => ghostfs_core::HashAlgorithm::SHA256,
+                        };
+                        config.manifest_path = Some(out.join("hash_manifest.json"));
+                    }
+                    if partial {
+                        config.enable_partial_recovery = true;
+                    }
+                    if reconstruct {
+                        config.enable_extent_reconstruction = true;
+                    }
+                }
+
+                // Forensics recovery
+                let forensics_report = ghostfs_core::recover_files_with_forensics(
+                    &image,
+                    &session,
+                    &out,
+                    file_ids_u64,
+                    config,
+                )?;
+
+                let recovery_report = forensics_report.report;
+
+                // Display recovery results
+                println!("\n🎉 Recovery Report:");
+                println!(
+                    "Successfully recovered: {}",
+                    recovery_report.recovered_files
+                );
+                println!("Failed recoveries: {}", recovery_report.failed_files);
+                println!("Total files processed: {}", recovery_report.total_files);
+
+                if forensics_report.partial_recoveries > 0 {
+                    println!(
+                        "Partial recoveries: {} files",
+                        forensics_report.partial_recoveries
+                    );
+                }
+
+                if forensics_report.extent_reconstructions > 0 {
+                    println!(
+                        "Extent reconstructions: {} files",
+                        forensics_report.extent_reconstructions
+                    );
+                }
+
+                if let Some(ref audit_path) = forensics_report.audit_log_path {
+                    println!("\n📝 Audit trail: {}", audit_path.display());
+                }
+
+                if let Some(ref manifest_path) = forensics_report.manifest_path {
+                    println!("🔐 Hash manifest: {}", manifest_path.display());
+                }
+
+                if !recovery_report.recovery_details.is_empty() {
+                    println!("\nDetailed Results:");
+                    for result in &recovery_report.recovery_details {
+                        match &result.status {
+                            ghostfs_core::RecoveryStatus::Success => {
+                                println!(
+                                    "  ✅ {} -> {}",
+                                    result.file_id,
+                                    result.recovered_path.display()
+                                );
+                            }
+                            ghostfs_core::RecoveryStatus::Failed(error) => {
+                                println!("  ❌ {} -> Failed: {}", result.file_id, error);
+                            }
+                        }
+                    }
+                }
+
+                if recovery_report.recovered_files > 0 {
+                    println!("\n✨ Recovery completed! Files saved to: {}", out.display());
+                }
+            } else {
+                // Standard recovery (no forensics)
+                let recovery_report = ghostfs_core::recover_files(
+                    &image,
+                    &session,
+                    &out,
+                    file_ids_u64,
+                )?;
+
+                // Display recovery results
+                println!("\nRecovery Report:");
+                println!(
+                    "Successfully recovered: {}",
+                    recovery_report.recovered_files
+                );
+                println!("Failed recoveries: {}", recovery_report.failed_files);
+                println!("Total files processed: {}", recovery_report.total_files);
+
+                if !recovery_report.recovery_details.is_empty() {
+                    println!("\nDetailed Results:");
+                    for result in &recovery_report.recovery_details {
+                        match &result.status {
+                            ghostfs_core::RecoveryStatus::Success => {
+                                println!(
+                                    "  {} -> {}",
+                                    result.file_id,
+                                    result.recovered_path.display()
+                                );
+                            }
+                            ghostfs_core::RecoveryStatus::Failed(error) => {
+                                println!("  {} -> Failed: {}", result.file_id, error);
+                            }
+                        }
+                    }
+                }
+
+                if recovery_report.recovered_files > 0 {
+                    println!("Recovery completed! Files saved to: {}", out.display());
+                }
+            }
+        }
+        Commands::Timeline {
+            image,
+            fs,
+            json,
+            csv,
+        } => {
+            println!("📅 Generating Recovery Timeline...\n");
+
+            let fs_type = match fs.as_str() {
+                "xfs" => FileSystemType::Xfs,
+                "btrfs" => FileSystemType::Btrfs,
+                "exfat" => FileSystemType::ExFat,
+                _ => unreachable!(),
+            };
+
+            // Perform scan to get recovery session
+            println!("🔍 Scanning {} filesystem...", fs_type);
+            let session = match ghostfs_core::scan_and_analyze(&image, fs_type) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("❌ Failed to scan image: {}", e);
+                    return Err(e);
                 }
             };
 
-            // Display recovery results
-            println!("\nRecovery Report:");
             println!(
-                "Successfully recovered: {}",
-                recovery_report.recovered_files
+                "✅ Scan complete: {} files found\n",
+                session.scan_results.len()
             );
-            println!("Failed recoveries: {}", recovery_report.failed_files);
-            println!("Total files processed: {}", recovery_report.total_files);
 
-            if !recovery_report.recovery_details.is_empty() {
-                println!("\nDetailed Results:");
-                for result in &recovery_report.recovery_details {
-                    match &result.status {
-                        ghostfs_core::RecoveryStatus::Success => {
-                            println!(
-                                "  {} -> {}",
-                                result.file_id,
-                                result.recovered_path.display()
-                            );
+            // Generate timeline
+            use ghostfs_core::RecoveryTimeline;
+            let timeline = RecoveryTimeline::from_session(&session);
+
+            // Display text report
+            println!("{}", timeline.to_text_report());
+
+            // Export to JSON if requested
+            if let Some(ref json_path) = json {
+                match timeline.to_json() {
+                    Ok(json_data) => {
+                        if let Err(e) = std::fs::write(json_path, json_data) {
+                            eprintln!("⚠️  Failed to write JSON file: {}", e);
+                        } else {
+                            println!("\n💾 Timeline saved to: {}", json_path.display());
                         }
-                        ghostfs_core::RecoveryStatus::Failed(error) => {
-                            println!("  {} -> Failed: {}", result.file_id, error);
-                        }
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  Failed to serialize timeline to JSON: {}", e);
                     }
                 }
             }
 
-            if recovery_report.recovered_files > 0 {
-                println!("Recovery completed! Files saved to: {}", out.display());
+            // Export to CSV if requested
+            if let Some(ref csv_path) = csv {
+                let csv_data = timeline.to_csv();
+                if let Err(e) = std::fs::write(csv_path, csv_data) {
+                    eprintln!("⚠️  Failed to write CSV file: {}", e);
+                } else {
+                    println!("💾 Timeline saved to: {}", csv_path.display());
+                }
             }
-        }
-        Commands::Timeline => {
-            println!("Timeline analysis");
-            println!("Timeline functionality not yet implemented");
+
+            // Provide helpful next steps
+            if !timeline.events.is_empty() {
+                println!("\n💡 Next Steps:");
+                println!("   • Use 'ghostfs recover' to restore files");
+                if !timeline.patterns.is_empty() {
+                    println!("   • Review suspicious patterns above for forensic analysis");
+                }
+                if json.is_none() && csv.is_none() {
+                    println!("   • Add --json or --csv flags to export timeline data");
+                }
+            }
         }
     }
     Ok(())

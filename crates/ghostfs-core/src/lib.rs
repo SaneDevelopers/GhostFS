@@ -7,13 +7,27 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+pub mod forensics;
 pub mod fs;
 pub mod recovery;
+pub mod timeline;
 
 // Re-export key recovery types
 pub use recovery::{
-    ActivityLevel, ConfidenceReport, FileSignature, RecoveryConfig, RecoveryEngine, RecoveryError,
-    RecoveryProgress, RecoveryResult, RecoveryStage, SignatureAnalysisResult,
+    ActivityLevel, ConfidenceReport, ExtentReconstructor, FileSignature, FragmentCatalog,
+    GapInfo, PartialRecovery, PartialRecoveryResult, ReconstructionResult,
+    ReconstructionStrategy, RecoveryConfig, RecoveryEngine, RecoveryError, RecoveryProgress,
+    RecoveryResult, RecoveryStage, SignatureAnalysisResult,
+};
+
+// Re-export timeline types
+pub use timeline::{DeletionPattern, PatternType, RecoveryTimeline, TimelineStatistics};
+
+// Re-export forensics types
+pub use forensics::{
+    calculate_file_hash, calculate_hash, recover_files_with_forensics, verify_file_integrity,
+    AuditEntry, AuditEvent, AuditEventType, AuditLog, AuditLogger, FileHash, ForensicsConfig,
+    ForensicsRecoveryReport, HashAlgorithm, HashManifest, HashVerification, VerificationStatus,
 };
 
 // Re-export XFS recovery config for advanced users

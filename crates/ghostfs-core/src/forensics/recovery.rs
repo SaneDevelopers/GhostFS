@@ -3,12 +3,11 @@
 /// This module provides forensics-enabled recovery operations that integrate
 /// audit trail logging and hash verification for legal/forensic use cases.
 use anyhow::Result;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::forensics::{
-    AuditEvent, AuditEventType, AuditLog, AuditLogger, HashAlgorithm, HashManifest,
+    AuditLog, AuditLogger, HashAlgorithm, HashManifest,
 };
 use crate::{
     DeletedFile, FileRecoveryResult, FileSystemType, RecoveryReport, RecoverySession,

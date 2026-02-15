@@ -88,7 +88,10 @@ fn test_jpeg_fragment_reassembly() {
 fn test_multiple_file_reassembly() {
     let mut catalog = FragmentCatalog::new();
 
-    // File 1: JPEG (2 fragments)
+    let now = chrono::Utc::now();
+    let earlier = now - chrono::Duration::hours(48);
+
+    // File 1: JPEG (2 fragments) — spatially close, same timestamp
     let mut jpeg1 = Fragment::new(0, 0, 1024, 0);
     jpeg1.signature = Some(SignatureMatch {
         category: "image".to_string(),
@@ -102,12 +105,14 @@ fn test_multiple_file_reassembly() {
         confidence: 1.0,
     });
     jpeg1.set_data(vec![0xFF, 0xD8, 0xFF, 0xE0]);
+    jpeg1.temporal_hint = Some(now);
 
-    let mut jpeg2 = Fragment::new(0, 4096, 512, 1);
+    let mut jpeg2 = Fragment::new(0, 1024, 1024, 1);
     jpeg2.set_data(vec![0xFF, 0xD8, 0xFF, 0xE0]); // Similar content
+    jpeg2.temporal_hint = Some(now);
 
-    // File 2: PNG (2 fragments)
-    let mut png1 = Fragment::new(0, 8192, 2048, 2);
+    // File 2: PNG (2 fragments) — spatially close, different timestamp
+    let mut png1 = Fragment::new(0, 500_000, 2048, 2);
     png1.signature = Some(SignatureMatch {
         category: "image".to_string(),
         signature: FileSignature {
@@ -120,9 +125,11 @@ fn test_multiple_file_reassembly() {
         confidence: 1.0,
     });
     png1.set_data(vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]);
+    png1.temporal_hint = Some(earlier);
 
-    let mut png2 = Fragment::new(0, 12288, 1024, 3);
+    let mut png2 = Fragment::new(0, 502_048, 2048, 3);
     png2.set_data(vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]); // Similar content
+    png2.temporal_hint = Some(earlier);
 
     catalog.add_fragment(jpeg1);
     catalog.add_fragment(jpeg2);

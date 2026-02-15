@@ -144,7 +144,7 @@ impl FragmentMatcher {
     }
 
     /// Calculate spatial proximity (disk location)
-    fn spatial_proximity(&self, frag1: &Fragment, frag2: &Fragment) -> f32 {
+    pub fn spatial_proximity(&self, frag1: &Fragment, frag2: &Fragment) -> f32 {
         let distance = if frag1.start_offset > frag2.start_offset {
             frag1.start_offset - frag2.start_offset
         } else {

@@ -7,7 +7,9 @@ pub mod signatures;
 // Fragment reassembly modules
 pub mod fragment_matcher;
 pub mod fragments;
+pub mod partial;
 pub mod reassembly;
+pub mod reconstruction;
 
 pub use confidence::{
     calculate_confidence_score, generate_confidence_report, ActivityLevel, ConfidenceContext,
@@ -31,4 +33,6 @@ pub use directory::{
 
 pub use fragment_matcher::{calculate_entropy, FragmentMatcher, MatchScore};
 pub use fragments::{Fragment, FragmentCatalog, FragmentId};
+pub use partial::{PartialRecovery, PartialRecoveryResult};
 pub use reassembly::{GapInfo, ReassemblyEngine, ReassemblyResult, ReassemblyStatistics};
+pub use reconstruction::{ExtentReconstructor, ReconstructionResult, ReconstructionStrategy};

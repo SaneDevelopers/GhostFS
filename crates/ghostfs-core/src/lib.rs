@@ -9,12 +9,16 @@ use uuid::Uuid;
 
 pub mod fs;
 pub mod recovery;
+pub mod timeline;
 
 // Re-export key recovery types
 pub use recovery::{
     ActivityLevel, ConfidenceReport, FileSignature, RecoveryConfig, RecoveryEngine, RecoveryError,
     RecoveryProgress, RecoveryResult, RecoveryStage, SignatureAnalysisResult,
 };
+
+// Re-export timeline types
+pub use timeline::{DeletionPattern, PatternType, RecoveryTimeline, TimelineStatistics};
 
 // Re-export XFS recovery config for advanced users
 pub use fs::xfs::XfsRecoveryConfig;

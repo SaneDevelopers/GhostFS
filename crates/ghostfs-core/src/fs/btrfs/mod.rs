@@ -3,6 +3,9 @@ use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Cursor;
 
+pub mod recovery;
+pub mod tree;
+
 use super::common::BlockDevice;
 
 /// Btrfs magic number
@@ -38,43 +41,43 @@ impl BtrfsSuperblock {
         }
 
         let mut cursor = Cursor::new(data);
-        
+
         // Skip checksum (32 bytes)
         cursor.set_position(32);
-        
+
         let mut uuid = [0u8; 16];
         std::io::Read::read_exact(&mut cursor, &mut uuid)?;
-        
+
         let physical_address = cursor.read_u64::<LittleEndian>()?;
         let flags = cursor.read_u64::<LittleEndian>()?;
-        
+
         let mut magic = [0u8; 8];
         std::io::Read::read_exact(&mut cursor, &mut magic)?;
-        
+
         if &magic != BTRFS_MAGIC {
             anyhow::bail!("Invalid Btrfs magic");
         }
-        
+
         let generation = cursor.read_u64::<LittleEndian>()?;
         let root = cursor.read_u64::<LittleEndian>()?;
         let chunk_root = cursor.read_u64::<LittleEndian>()?;
         let log_root = cursor.read_u64::<LittleEndian>()?;
-        
+
         // Skip log_root_transid
         cursor.set_position(cursor.position() + 8);
-        
+
         let total_bytes = cursor.read_u64::<LittleEndian>()?;
         let bytes_used = cursor.read_u64::<LittleEndian>()?;
         let root_dir_objectid = cursor.read_u64::<LittleEndian>()?;
         let num_devices = cursor.read_u64::<LittleEndian>()?;
         let sectorsize = cursor.read_u32::<LittleEndian>()?;
         let nodesize = cursor.read_u32::<LittleEndian>()?;
-        
+
         // Skip leafsize (deprecated)
         cursor.set_position(cursor.position() + 4);
-        
+
         let stripesize = cursor.read_u32::<LittleEndian>()?;
-        
+
         // Skip some fields to get to chunk_root_generation
         cursor.set_position(176);
         let chunk_root_generation = cursor.read_u64::<LittleEndian>()?;
@@ -108,7 +111,7 @@ pub fn is_btrfs_superblock(data: &[u8]) -> bool {
     if data.len() < 72 {
         return false;
     }
-    
+
     // Btrfs magic is at offset 64
     &data[64..72] == BTRFS_MAGIC
 }
@@ -118,7 +121,7 @@ pub fn get_filesystem_info(device: &BlockDevice) -> Result<String> {
     // Btrfs superblock is at 64KB
     let sb_data = device.read_bytes(65536, 4096)?;
     let superblock = BtrfsSuperblock::parse(sb_data)?;
-    
+
     let fs_size_mb = superblock.total_bytes / (1024 * 1024);
     let used_mb = superblock.bytes_used / (1024 * 1024);
     let uuid_str = format!("{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
@@ -127,7 +130,7 @@ pub fn get_filesystem_info(device: &BlockDevice) -> Result<String> {
         superblock.uuid[8], superblock.uuid[9], superblock.uuid[10], superblock.uuid[11],
         superblock.uuid[12], superblock.uuid[13], superblock.uuid[14], superblock.uuid[15]
     );
-    
+
     Ok(format!(
         "Btrfs File System\n\
          - Sector Size: {} bytes\n\
@@ -151,26 +154,24 @@ pub fn get_filesystem_info(device: &BlockDevice) -> Result<String> {
     ))
 }
 
-/// Scan for deleted files in Btrfs (placeholder implementation)
+/// Scan for deleted files in Btrfs
 pub fn scan_for_deleted_files(device: &BlockDevice) -> Result<Vec<crate::DeletedFile>> {
-    let _superblock = {
-        let sb_data = device.read_bytes(65536, 4096)?;
-        BtrfsSuperblock::parse(sb_data)?
-    };
-    
-    tracing::info!("Btrfs scan: Starting tree analysis...");
-    
-    // TODO: Implement actual Btrfs scanning:
-    // 1. Parse tree roots (extent tree, chunk tree, device tree)
-    // 2. Enumerate snapshots and subvolumes
-    // 3. Scan for deleted inodes in tree structures
-    // 4. Leverage COW semantics for historical recovery
-    // 5. Handle compression (LZ4, ZLIB, ZSTD)
-    
-    tracing::info!("Btrfs scan: Analysis complete (placeholder)");
-    
-    // Return empty results for now
-    Ok(Vec::new())
+    // Parse superblock
+    let sb_data = device.read_bytes(65536, 4096)?;
+    let superblock = BtrfsSuperblock::parse(sb_data)?;
+
+    tracing::info!("Btrfs scan: Starting tree analysis");
+    tracing::info!("  Generation: {}", superblock.generation);
+    tracing::info!("  Root tree: 0x{:x}", superblock.root);
+    tracing::info!("  Node size: {} bytes", superblock.nodesize);
+
+    // Create and use the recovery engine
+    let recovery_engine = recovery::BtrfsRecoveryEngine::new(device, superblock)?;
+    let deleted_files = recovery_engine.scan_deleted_files()?;
+
+    tracing::info!("Btrfs scan complete: {} files found", deleted_files.len());
+
+    Ok(deleted_files)
 }
 
 #[cfg(test)]
@@ -182,7 +183,7 @@ mod tests {
         let mut test_data = vec![0u8; 72];
         test_data[64..72].copy_from_slice(BTRFS_MAGIC);
         assert!(is_btrfs_superblock(&test_data));
-        
+
         let wrong_magic = vec![0u8; 72];
         assert!(!is_btrfs_superblock(&wrong_magic));
     }

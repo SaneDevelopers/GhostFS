@@ -37,6 +37,8 @@ tracing = "0.1"                                        # Structured logging
 sha2 = "0.10"                                          # SHA-256, SHA-512 hashing
 md5 = "0.7"                                            # MD5 hashing  
 sha1 = "0.10"                                          # SHA-1 hashing
+rusqlite = { version = "0.31", features = ["bundled"] } # Session persistence
+dirs = "5.0"                                           # Home directory detection
 
 [dev-dependencies]
 tempfile = "3" # Temporary files for testing

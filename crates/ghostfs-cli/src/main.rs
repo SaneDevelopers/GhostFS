@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use ghostfs_core::{FileSystemType, XfsRecoveryConfig};
+use ghostfs_core::{FileSystemType, XfsRecoveryConfig, SessionManager};
 
 /// Parse user input for scan limit (e.g., "50%", "10GB", "all")
 fn parse_scan_limit(input: &str, total_blocks: u64, block_size: u32) -> Option<u64> {
@@ -100,6 +100,35 @@ struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+enum SessionAction {
+    /// List all saved sessions
+    List {
+        /// Filter by filesystem type (xfs, btrfs, exfat)
+        #[arg(long)]
+        fs: Option<String>,
+        /// Filter by device path
+        #[arg(long)]
+        device: Option<String>,
+    },
+    /// Show detailed information about a session
+    Info {
+        /// Session ID (full UUID or first 8+ characters)
+        id: String,
+    },
+    /// Delete one or more sessions
+    Delete {
+        /// Session ID(s) to delete
+        ids: Vec<String>,
+    },
+    /// Clean up old sessions (older than specified days)
+    Cleanup {
+        /// Delete sessions older than this many days
+        #[arg(long, default_value = "30")]
+        days: u32,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum Commands {
     /// Scan an image file for recoverable entries
     Scan {
@@ -114,6 +143,12 @@ enum Commands {
         /// Disable interactive prompts (for CI/automation)
         #[arg(long)]
         no_interactive: bool,
+        /// Save session after scanning
+        #[arg(long)]
+        save: bool,
+        /// Optional session name (defaults to device path)
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Detect filesystem type
     Detect {
@@ -123,10 +158,14 @@ enum Commands {
     /// Recover files from an image
     Recover {
         /// Path to image file
-        image: PathBuf,
-        /// Filesystem type
-        #[arg(long, value_parser = ["xfs", "btrfs", "exfat"], default_value = "xfs")]
-        fs: String,
+        #[arg(long, conflicts_with = "session")]
+        image: Option<PathBuf>,
+        /// Load session from database (ID or first 8+ chars)
+        #[arg(long, conflicts_with = "image")]
+        session: Option<String>,
+        /// Filesystem type (required with --image)
+        #[arg(long, value_parser = ["xfs", "btrfs", "exfat"], required_if_eq("session", "None"))]
+        fs: Option<String>,
         /// Output directory for recovered files
         #[arg(long)]
         out: PathBuf,
@@ -168,6 +207,11 @@ enum Commands {
         /// Export timeline to CSV file
         #[arg(long)]
         csv: Option<PathBuf>,
+    },
+    /// Manage saved recovery sessions
+    Sessions {
+        #[command(subcommand)]
+        action: SessionAction,
     },
 }
 
@@ -217,6 +261,8 @@ fn main() -> Result<()> {
             fs,
             info,
             no_interactive,
+            save,
+            name,
         } => {
             let fs_type = match fs.as_str() {
                 "xfs" => FileSystemType::Xfs,
@@ -296,6 +342,18 @@ fn main() -> Result<()> {
                     println!("     {}", recommendation);
                 }
             }
+
+            // Save session if requested
+            if save {
+                let manager = SessionManager::new()?;
+                manager.save(&session)?;
+                
+                let session_name = name.unwrap_or_else(|| image.display().to_string());
+                println!("\n💾 Session saved!");
+                println!("   ID: {}", &session.id.to_string()[..8]);
+                println!("   Name: {}", session_name);
+                println!("\n💡 Recover later with: ghostfs recover --session {} --out ./recovered", &session.id.to_string()[..8]);
+            }
         }
         Commands::Detect { image } => {
             println!("Detecting file system type for: {}", image.display());
@@ -317,6 +375,7 @@ fn main() -> Result<()> {
         }
         Commands::Recover {
             image,
+            session: session_id,
             fs,
             out,
             ids,
@@ -328,44 +387,70 @@ fn main() -> Result<()> {
             partial,
             reconstruct,
         } => {
-            println!("Starting recovery process for: {}", image.display());
-            println!("Output directory: {}", out.display());
-
-            // Parse filesystem type
-            let fs_type = match fs.as_str() {
-                "xfs" => ghostfs_core::FileSystemType::Xfs,
-                "btrfs" => ghostfs_core::FileSystemType::Btrfs,
-                "exfat" => ghostfs_core::FileSystemType::ExFat,
-                _ => {
-                    eprintln!("Unsupported filesystem type: {}", fs);
-                    std::process::exit(1);
-                }
-            };
+            // Validate that either image or session is provided
+            if image.is_none() && session_id.is_none() {
+                eprintln!("❌ Error: Either --image or --session must be provided");
+                std::process::exit(1);
+            }
 
             // Create output directory if it doesn't exist
             std::fs::create_dir_all(&out)?;
 
-            // Get XFS config - only prompt interactively if stdin is a TTY and not --no-interactive
-            let interactive = !no_interactive && atty::is(atty::Stream::Stdin);
-            let xfs_config = if fs_type == ghostfs_core::FileSystemType::Xfs {
-                get_xfs_config_for_scan(&image, interactive)?
+            // Load or scan for session
+            let (session, device_path) = if let Some(session_id_str) = session_id {
+                // Load from saved session
+                println!("📂 Loading session: {}", session_id_str);
+                let manager = SessionManager::new()?;
+                let loaded_session = manager.load(&session_id_str)?;
+                let device = loaded_session.device_path.display().to_string();
+                println!("✅ Session loaded: {}", loaded_session.fs_type);
+                println!("   Device: {}", device);
+                println!("   Recoverable Files: {}", loaded_session.metadata.recoverable_files);
+                (loaded_session, device)
             } else {
-                None
+                // Scan image to create new session
+                let image_path = image.as_ref().unwrap();
+                let fs_str = fs.as_ref().expect("--fs is required when using --image");
+                
+                println!("Starting recovery process for: {}", image_path.display());
+                println!("Output directory: {}", out.display());
+
+                // Parse filesystem type
+                let fs_type = match fs_str.as_str() {
+                    "xfs" => ghostfs_core::FileSystemType::Xfs,
+                    "btrfs" => ghostfs_core::FileSystemType::Btrfs,
+                    "exfat" => ghostfs_core::FileSystemType::ExFat,
+                    _ => {
+                        eprintln!("Unsupported filesystem type: {}", fs_str);
+                        std::process::exit(1);
+                    }
+                };
+
+                // Get XFS config - only prompt interactively if stdin is a TTY and not --no-interactive
+                let interactive = !no_interactive && atty::is(atty::Stream::Stdin);
+                let xfs_config = if fs_type == ghostfs_core::FileSystemType::Xfs {
+                    get_xfs_config_for_scan(&image_path, interactive)?
+                } else {
+                    None
+                };
+
+                // Perform scan to identify recoverable files (auto-confidence)
+                println!("Scanning for recoverable files...");
+                let scanned_session = ghostfs_core::scan_and_analyze_with_config(&image_path, fs_type, xfs_config)?;
+                let device = scanned_session.device_path.display().to_string();
+
+                if scanned_session.metadata.recoverable_files == 0 {
+                    println!("No recoverable files found (confidence >= 40%)");
+                    return Ok(());
+                }
+
+                println!(
+                    "Found {} recoverable files",
+                    scanned_session.metadata.recoverable_files
+                );
+                
+                (scanned_session, device)
             };
-
-            // Perform scan to identify recoverable files (auto-confidence)
-            println!("Scanning for recoverable files...");
-            let session = ghostfs_core::scan_and_analyze_with_config(&image, fs_type, xfs_config)?;
-
-            if session.metadata.recoverable_files == 0 {
-                println!("No recoverable files found (confidence >= 40%)");
-                return Ok(());
-            }
-
-            println!(
-                "Found {} recoverable files",
-                session.metadata.recoverable_files
-            );
 
             // Determine if forensics mode is enabled
             let use_forensics = forensics || audit || verify_hash || partial || reconstruct;
@@ -437,9 +522,10 @@ fn main() -> Result<()> {
                     }
                 }
 
-                // Forensics recovery
+                // Forensics recovery - use device path from session
+                let device_path_buf = PathBuf::from(&device_path);
                 let forensics_report = ghostfs_core::recover_files_with_forensics(
-                    &image,
+                    &device_path_buf,
                     &session,
                     &out,
                     file_ids_u64,
@@ -501,9 +587,10 @@ fn main() -> Result<()> {
                     println!("\n✨ Recovery completed! Files saved to: {}", out.display());
                 }
             } else {
-                // Standard recovery (no forensics)
+                // Standard recovery (no forensics) - use device path from session
+                let device_path_buf = PathBuf::from(&device_path);
                 let recovery_report = ghostfs_core::recover_files(
-                    &image,
+                    &device_path_buf,
                     &session,
                     &out,
                     file_ids_u64,
@@ -613,6 +700,131 @@ fn main() -> Result<()> {
                 }
                 if json.is_none() && csv.is_none() {
                     println!("   • Add --json or --csv flags to export timeline data");
+                }
+            }
+        }
+        Commands::Sessions { action } => {
+            let manager = SessionManager::new()?;
+
+            match action {
+                SessionAction::List { fs, device } => {
+                    let fs_type = fs.as_ref().map(|fs_str| match fs_str.as_str() {
+                        "xfs" => FileSystemType::Xfs,
+                        "btrfs" => FileSystemType::Btrfs,
+                        "exfat" => FileSystemType::ExFat,
+                        _ => unreachable!(),
+                    });
+
+                    let sessions = if let Some(ref dev) = device {
+                        manager.list_sessions_by_device(dev)?
+                    } else if let Some(fs_t) = fs_type {
+                        manager.list_sessions_by_fs(fs_t)?
+                    } else {
+                        manager.list()?
+                    };
+
+                    if sessions.is_empty() {
+                        println!("📭 No saved sessions found");
+                        println!("\n💡 Save a session with: ghostfs scan disk.img --fs xfs --save");
+                        return Ok(());
+                    }
+
+                    println!("📂 Saved Sessions ({} total)\n", sessions.len());
+                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+                    for session in sessions {
+                        let short_id = &session.id.to_string()[..8];
+                        let size_mb = session.device_size / (1024 * 1024);
+                        
+                        println!("\n📋 ID: {}", short_id);
+                        println!("   FS: {} | Device: {}", session.fs_type, session.device_path.display());
+                        println!("   Size: {} MB | Files: {} | Recoverable: {}", 
+                            size_mb, session.files_found, session.recoverable_files);
+                        println!("   Created: {}", session.created_at);
+                    }
+
+                    println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    println!("\n💡 Use 'ghostfs sessions info <id>' for detailed information");
+                    println!("💡 Use 'ghostfs recover --session <id> --out ./recovered' to recover files");
+                }
+                SessionAction::Info { id } => {
+                    let session = manager.load(&id)?;
+                    let short_id = &session.id.to_string()[..8];
+
+                    println!("📋 Session Details\n");
+                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    println!("\nID: {}", short_id);
+                    println!("Full ID: {}", session.id);
+                    println!("File System: {}", session.fs_type);
+                    println!("Device: {}", session.device_path.display());
+                    println!("Device Size: {} MB", session.metadata.device_size / (1024 * 1024));
+                    println!("Created: {}", session.created_at);
+                    println!("\nScan Results:");
+                    println!("  • Total Files Found: {}", session.metadata.files_found);
+                    println!("  • Recoverable Files: {}", session.metadata.recoverable_files);
+                    println!("  • Files in Session: {}", session.scan_results.len());
+
+                    if !session.scan_results.is_empty() {
+                        println!("\nTop Recoverable Files:");
+                        let mut sorted_files = session.scan_results.clone();
+                        sorted_files.sort_by(|a, b| b.confidence_score.partial_cmp(&a.confidence_score).unwrap());
+                        
+                        for (i, file) in sorted_files.iter().take(10).enumerate() {
+                            let path_str = file.original_path.as_ref()
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_else(|| format!("inode_{}", file.inode_or_cluster));
+                            
+                            let confidence_icon = if file.confidence_score >= 0.8 {
+                                "✅"
+                            } else if file.confidence_score >= 0.6 {
+                                "🟡"
+                            } else if file.confidence_score >= 0.4 {
+                                "🟠"
+                            } else {
+                                "❌"
+                            };
+
+                            println!("  {}. {} {} ({:.1}%) - {} bytes", 
+                                i + 1, confidence_icon, path_str, 
+                                file.confidence_score * 100.0, file.size);
+                        }
+
+                        if sorted_files.len() > 10 {
+                            println!("  ... and {} more files", sorted_files.len() - 10);
+                        }
+                    }
+
+                    println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    println!("\n💡 Recover with: ghostfs recover --session {} --out ./recovered", short_id);
+                }
+                SessionAction::Delete { ids } => {
+                    let mut deleted_count = 0;
+                    let mut failed_count = 0;
+
+                    for id in ids {
+                        match manager.delete(&id) {
+                            Ok(_) => {
+                                println!("✅ Deleted session: {}", id);
+                                deleted_count += 1;
+                            }
+                            Err(e) => {
+                                eprintln!("❌ Failed to delete session {}: {}", id, e);
+                                failed_count += 1;
+                            }
+                        }
+                    }
+
+                    println!("\n📊 Summary: {} deleted, {} failed", deleted_count, failed_count);
+                }
+                SessionAction::Cleanup { days } => {
+                    println!("🧹 Cleaning up sessions older than {} days...", days);
+                    let deleted = manager.cleanup(days)?;
+                    
+                    if deleted == 0 {
+                        println!("✨ No old sessions found - database is clean!");
+                    } else {
+                        println!("✅ Cleaned up {} old session(s)", deleted);
+                    }
                 }
             }
         }

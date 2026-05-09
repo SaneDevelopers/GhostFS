@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use console::style;
+use dialoguer::{theme::ColorfulTheme, Select, Input, Confirm, FuzzySelect};
 use ghostfs_core::{FileSystemType, XfsRecoveryConfig, SessionManager};
 
 /// Parse user input for scan limit (e.g., "50%", "10GB", "all")
@@ -96,7 +98,7 @@ fn prompt_scan_limit(total_blocks: u64, block_size: u32) -> Result<Option<u64>> 
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -250,12 +252,600 @@ fn get_xfs_config_for_scan(
     Ok(None) // Use adaptive defaults
 }
 
+// ========================================================================
+// Interactive Mode
+// ========================================================================
+
+/// State maintained across interactive commands
+struct InteractiveContext {
+    current_image: Option<PathBuf>,
+    current_session_id: Option<String>,
+    current_fs: Option<FileSystemType>,
+    last_output_dir: Option<PathBuf>,
+}
+
+impl Default for InteractiveContext {
+    fn default() -> Self {
+        Self {
+            current_image: None,
+            current_session_id: None,
+            current_fs: None,
+            last_output_dir: None,
+        }
+    }
+}
+
+impl InteractiveContext {
+    fn status_line(&self) -> String {
+        let mut parts = Vec::new();
+        
+        if let Some(ref img) = self.current_image {
+            let name = img.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| img.display().to_string());
+            parts.push(format!("📀 {}", name));
+        }
+        
+        if let Some(ref sess) = self.current_session_id {
+            parts.push(format!("📋 {}", &sess[..8.min(sess.len())]));
+        }
+        
+        if let Some(ref fs) = self.current_fs {
+            parts.push(format!("💾 {}", fs));
+        }
+        
+        if parts.is_empty() {
+            "No disk loaded".to_string()
+        } else {
+            parts.join(" │ ")
+        }
+    }
+}
+
+fn print_banner() {
+    println!();
+    println!("{}", style("╭─────────────────────────────────────────────╮").cyan());
+    println!("{}", style("│  🔮 GhostFS - Professional Data Recovery    │").cyan());
+    println!("{}", style("│     Interactive Mode                        │").cyan());
+    println!("{}", style("╰─────────────────────────────────────────────╯").cyan());
+    println!();
+}
+
+fn prompt_filesystem_type() -> Result<FileSystemType> {
+    let options = vec!["XFS", "Btrfs", "exFAT"];
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Select filesystem type")
+        .items(&options)
+        .default(0)
+        .interact()?;
+    
+    Ok(match selection {
+        0 => FileSystemType::Xfs,
+        1 => FileSystemType::Btrfs,
+        2 => FileSystemType::ExFat,
+        _ => FileSystemType::Xfs,
+    })
+}
+
+fn prompt_image_path(ctx: &InteractiveContext) -> Result<PathBuf> {
+    let prompt = if let Some(ref current) = ctx.current_image {
+        format!("Disk image path [{}]", current.display())
+    } else {
+        "Disk image path".to_string()
+    };
+    
+    let input: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt(&prompt)
+        .allow_empty(ctx.current_image.is_some())
+        .interact_text()?;
+    
+    if input.is_empty() && ctx.current_image.is_some() {
+        Ok(ctx.current_image.clone().unwrap())
+    } else {
+        let path = PathBuf::from(shellexpand::tilde(&input).to_string());
+        if !path.exists() {
+            eprintln!("{} File not found: {}", style("❌").red(), path.display());
+            anyhow::bail!("File not found");
+        }
+        Ok(path)
+    }
+}
+
+fn prompt_output_dir(ctx: &InteractiveContext) -> Result<PathBuf> {
+    let default = ctx.last_output_dir.clone()
+        .unwrap_or_else(|| PathBuf::from("./recovered"));
+    
+    let input: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Output directory")
+        .default(default.display().to_string())
+        .interact_text()?;
+    
+    Ok(PathBuf::from(shellexpand::tilde(&input).to_string()))
+}
+
+fn interactive_scan(ctx: &mut InteractiveContext) -> Result<()> {
+    println!("\n{}", style("📂 Scan Disk Image").bold().cyan());
+    println!("{}", style("─".repeat(40)).dim());
+    
+    // Get image path
+    let image = match prompt_image_path(ctx) {
+        Ok(p) => p,
+        Err(_) => return Ok(()),
+    };
+    
+    // Detect or prompt for filesystem
+    println!("\n🔍 Detecting filesystem...");
+    let fs_type = match ghostfs_core::fs::detect_filesystem(&image)? {
+        Some(detected) => {
+            println!("   Detected: {}", style(format!("{}", detected)).green());
+            if Confirm::with_theme(&ColorfulTheme::default())
+                .with_prompt(format!("Use detected filesystem ({})?", detected))
+                .default(true)
+                .interact()? {
+                detected
+            } else {
+                prompt_filesystem_type()?
+            }
+        }
+        None => {
+            println!("   Could not auto-detect filesystem type");
+            prompt_filesystem_type()?
+        }
+    };
+    
+    // Get XFS config for large filesystems
+    let xfs_config = if fs_type == FileSystemType::Xfs {
+        get_xfs_config_for_scan(&image, true)?
+    } else {
+        None
+    };
+    
+    // Perform scan
+    println!("\n⏳ Scanning...");
+    let session = ghostfs_core::scan_and_analyze_with_config(&image, fs_type, xfs_config)?;
+    
+    // Update context
+    ctx.current_image = Some(image.clone());
+    ctx.current_fs = Some(fs_type);
+    ctx.current_session_id = Some(session.id.to_string());
+    
+    // Display results
+    println!("\n{}", style("✅ Scan Complete!").green().bold());
+    println!("   Session ID: {}", &session.id.to_string()[..8]);
+    println!("   Files Found: {}", session.metadata.files_found);
+    println!("   Recoverable: {} (confidence >= 40%)", session.metadata.recoverable_files);
+    
+    // Show top files
+    if !session.scan_results.is_empty() {
+        let mut sorted = session.scan_results.clone();
+        sorted.sort_by(|a, b| b.confidence_score.partial_cmp(&a.confidence_score).unwrap());
+        
+        println!("\n📄 Top Recoverable Files:");
+        for file in sorted.iter().take(5) {
+            let path_str = file.original_path.as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| format!("inode_{}", file.inode_or_cluster));
+            
+            let icon = if file.confidence_score >= 0.8 { "✅" }
+                      else if file.confidence_score >= 0.6 { "🟡" }
+                      else if file.confidence_score >= 0.4 { "🟠" }
+                      else { "❌" };
+            
+            println!("   {} {} ({:.0}%) - {} bytes", 
+                icon, path_str, file.confidence_score * 100.0, file.size);
+        }
+        
+        if sorted.len() > 5 {
+            println!("   ... and {} more files", sorted.len() - 5);
+        }
+    }
+    
+    // Ask to save session
+    if Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt("Save session for later?")
+        .default(true)
+        .interact()? {
+        let manager = SessionManager::new()?;
+        manager.save(&session)?;
+        println!("💾 Session saved: {}", &session.id.to_string()[..8]);
+    }
+    
+    Ok(())
+}
+
+fn interactive_recover(ctx: &mut InteractiveContext) -> Result<()> {
+    println!("\n{}", style("💾 Recover Data").bold().cyan());
+    println!("{}", style("─".repeat(40)).dim());
+    
+    // Determine session source
+    let manager = SessionManager::new()?;
+    let sessions = manager.list()?;
+    
+    let session = if ctx.current_session_id.is_some() || !sessions.is_empty() {
+        let mut options = Vec::new();
+        
+        if ctx.current_session_id.is_some() {
+            options.push("Use current session".to_string());
+        }
+        
+        if !sessions.is_empty() {
+            options.push("Select saved session".to_string());
+        }
+        
+        options.push("Scan new disk image".to_string());
+        
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Recovery source")
+            .items(&options)
+            .default(0)
+            .interact()?;
+        
+        let selected = &options[selection];
+        
+        if selected == "Use current session" {
+            let session_id = ctx.current_session_id.as_ref().unwrap();
+            manager.load(session_id)?
+        } else if selected == "Select saved session" {
+            // List sessions
+            let session_items: Vec<String> = sessions.iter().map(|s| {
+                format!("{} │ {} │ {} files │ {}", 
+                    &s.id.to_string()[..8],
+                    s.fs_type,
+                    s.recoverable_files,
+                    s.device_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+                )
+            }).collect();
+            
+            let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+                .with_prompt("Select session")
+                .items(&session_items)
+                .interact()?;
+            
+            let selected_session = &sessions[selection];
+            ctx.current_session_id = Some(selected_session.id.to_string());
+            manager.load(&selected_session.id.to_string())?
+        } else {
+            // Scan new image
+            interactive_scan(ctx)?;
+            if ctx.current_session_id.is_none() {
+                return Ok(());
+            }
+            manager.load(ctx.current_session_id.as_ref().unwrap())?
+        }
+    } else {
+        // No sessions available - must scan
+        println!("No saved sessions found. Let's scan a disk image first.\n");
+        interactive_scan(ctx)?;
+        if ctx.current_session_id.is_none() {
+            return Ok(());
+        }
+        manager.load(ctx.current_session_id.as_ref().unwrap())?
+    };
+    
+    if session.metadata.recoverable_files == 0 {
+        println!("\n⚠️  No recoverable files in this session");
+        return Ok(());
+    }
+    
+    // Get output directory
+    let out = prompt_output_dir(ctx)?;
+    std::fs::create_dir_all(&out)?;
+    ctx.last_output_dir = Some(out.clone());
+    
+    // Recovery options
+    let options = vec![
+        "Standard recovery",
+        "Forensics mode (audit trail + hash verification)",
+        "Partial file recovery (recover fragments)",
+    ];
+    
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Recovery mode")
+        .items(&options)
+        .default(0)
+        .interact()?;
+    
+    println!("\n⏳ Recovering files...");
+    
+    let device_path = session.device_path.clone();
+    
+    match selection {
+        0 => {
+            // Standard recovery
+            let report = ghostfs_core::recover_files(&device_path, &session, &out, None)?;
+            println!("\n{}", style("✅ Recovery Complete!").green().bold());
+            println!("   Recovered: {} files", report.recovered_files);
+            println!("   Failed: {} files", report.failed_files);
+            println!("   Output: {}", out.display());
+        }
+        1 => {
+            // Forensics mode
+            let config = ghostfs_core::ForensicsConfig::full_forensics(&out);
+            let forensics_report = ghostfs_core::recover_files_with_forensics(
+                &device_path, &session, &out, None, config)?;
+            
+            println!("\n{}", style("✅ Forensics Recovery Complete!").green().bold());
+            println!("   Recovered: {} files", forensics_report.report.recovered_files);
+            println!("   Failed: {} files", forensics_report.report.failed_files);
+            if let Some(ref audit) = forensics_report.audit_log_path {
+                println!("   Audit log: {}", audit.display());
+            }
+            if let Some(ref manifest) = forensics_report.manifest_path {
+                println!("   Hash manifest: {}", manifest.display());
+            }
+        }
+        2 => {
+            // Partial recovery
+            let mut config = ghostfs_core::ForensicsConfig::default();
+            config.enable_partial_recovery = true;
+            config.enable_extent_reconstruction = true;
+            
+            let forensics_report = ghostfs_core::recover_files_with_forensics(
+                &device_path, &session, &out, None, config)?;
+            
+            println!("\n{}", style("✅ Partial Recovery Complete!").green().bold());
+            println!("   Recovered: {} files", forensics_report.report.recovered_files);
+            println!("   Partial: {} files", forensics_report.partial_recoveries);
+            println!("   Reconstructed: {} extents", forensics_report.extent_reconstructions);
+        }
+        _ => {}
+    }
+    
+    Ok(())
+}
+
+fn interactive_timeline(ctx: &mut InteractiveContext) -> Result<()> {
+    println!("\n{}", style("📅 Generate Timeline").bold().cyan());
+    println!("{}", style("─".repeat(40)).dim());
+    
+    // Get image path
+    let image = match prompt_image_path(ctx) {
+        Ok(p) => p,
+        Err(_) => return Ok(()),
+    };
+    
+    // Detect or prompt filesystem
+    let fs_type = if let Some(ref current_fs) = ctx.current_fs {
+        if ctx.current_image.as_ref() == Some(&image) {
+            *current_fs
+        } else {
+            match ghostfs_core::fs::detect_filesystem(&image)? {
+                Some(detected) => detected,
+                None => prompt_filesystem_type()?,
+            }
+        }
+    } else {
+        match ghostfs_core::fs::detect_filesystem(&image)? {
+            Some(detected) => {
+                println!("   Detected: {}", style(format!("{}", detected)).green());
+                detected
+            }
+            None => prompt_filesystem_type()?,
+        }
+    };
+    
+    // Scan for timeline
+    println!("\n⏳ Scanning for timeline data...");
+    let session = ghostfs_core::scan_and_analyze(&image, fs_type)?;
+    
+    ctx.current_image = Some(image);
+    ctx.current_fs = Some(fs_type);
+    ctx.current_session_id = Some(session.id.to_string());
+    
+    // Generate timeline
+    use ghostfs_core::RecoveryTimeline;
+    let timeline = RecoveryTimeline::from_session(&session);
+    
+    // Display
+    println!("\n{}", timeline.to_text_report());
+    
+    // Export options
+    let options = vec![
+        "Done (no export)",
+        "Export to JSON",
+        "Export to CSV",
+        "Export to both JSON and CSV",
+    ];
+    
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Export timeline?")
+        .items(&options)
+        .default(0)
+        .interact()?;
+    
+    if selection > 0 {
+        let base_name: String = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Output filename (without extension)")
+            .default("timeline".to_string())
+            .interact_text()?;
+        
+        if selection == 1 || selection == 3 {
+            let json_path = format!("{}.json", base_name);
+            if let Ok(json_data) = timeline.to_json() {
+                std::fs::write(&json_path, json_data)?;
+                println!("💾 Saved: {}", json_path);
+            }
+        }
+        
+        if selection == 2 || selection == 3 {
+            let csv_path = format!("{}.csv", base_name);
+            std::fs::write(&csv_path, timeline.to_csv())?;
+            println!("💾 Saved: {}", csv_path);
+        }
+    }
+    
+    Ok(())
+}
+
+fn interactive_sessions(ctx: &mut InteractiveContext) -> Result<()> {
+    println!("\n{}", style("📋 Manage Sessions").bold().cyan());
+    println!("{}", style("─".repeat(40)).dim());
+    
+    let manager = SessionManager::new()?;
+    
+    let options = vec![
+        "List all sessions",
+        "View session details",
+        "Delete sessions",
+        "Cleanup old sessions",
+        "Back to main menu",
+    ];
+    
+    loop {
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Session action")
+            .items(&options)
+            .default(0)
+            .interact()?;
+        
+        match selection {
+            0 => {
+                // List
+                let sessions = manager.list()?;
+                if sessions.is_empty() {
+                    println!("\n📭 No saved sessions");
+                } else {
+                    println!("\n📂 {} session(s):\n", sessions.len());
+                    for s in &sessions {
+                        let short_id = &s.id.to_string()[..8];
+                        println!("  {} │ {} │ {} files │ {} MB │ {}",
+                            style(short_id).cyan(),
+                            s.fs_type,
+                            s.recoverable_files,
+                            s.device_size / (1024 * 1024),
+                            s.device_path.display()
+                        );
+                    }
+                }
+            }
+            1 => {
+                // View details
+                let sessions = manager.list()?;
+                if sessions.is_empty() {
+                    println!("\n📭 No sessions to view");
+                    continue;
+                }
+                
+                let session_items: Vec<String> = sessions.iter().map(|s| {
+                    format!("{} │ {}", &s.id.to_string()[..8], s.device_path.display())
+                }).collect();
+                
+                let sel = FuzzySelect::with_theme(&ColorfulTheme::default())
+                    .with_prompt("Select session to view")
+                    .items(&session_items)
+                    .interact()?;
+                
+                let full_session = manager.load(&sessions[sel].id.to_string())?;
+                println!("\n📋 Session: {}", &full_session.id.to_string()[..8]);
+                println!("   Full ID: {}", full_session.id);
+                println!("   Filesystem: {}", full_session.fs_type);
+                println!("   Device: {}", full_session.device_path.display());
+                println!("   Files: {} total, {} recoverable", 
+                    full_session.metadata.files_found, 
+                    full_session.metadata.recoverable_files);
+                println!("   Created: {}", full_session.created_at);
+            }
+            2 => {
+                // Delete
+                let sessions = manager.list()?;
+                if sessions.is_empty() {
+                    println!("\n📭 No sessions to delete");
+                    continue;
+                }
+                
+                let session_items: Vec<String> = sessions.iter().map(|s| {
+                    format!("{} │ {}", &s.id.to_string()[..8], s.device_path.display())
+                }).collect();
+                
+                let sel = FuzzySelect::with_theme(&ColorfulTheme::default())
+                    .with_prompt("Select session to delete")
+                    .items(&session_items)
+                    .interact()?;
+                
+                if Confirm::with_theme(&ColorfulTheme::default())
+                    .with_prompt("Are you sure?")
+                    .default(false)
+                    .interact()? {
+                    manager.delete(&sessions[sel].id.to_string())?;
+                    println!("✅ Deleted");
+                    
+                    // Clear context if we deleted current session
+                    if ctx.current_session_id.as_ref() == Some(&sessions[sel].id.to_string()) {
+                        ctx.current_session_id = None;
+                    }
+                }
+            }
+            3 => {
+                // Cleanup
+                let days: u32 = Input::with_theme(&ColorfulTheme::default())
+                    .with_prompt("Delete sessions older than (days)")
+                    .default(30)
+                    .interact_text()?;
+                
+                let deleted = manager.cleanup(days)?;
+                println!("🧹 Cleaned up {} session(s)", deleted);
+            }
+            4 => break,
+            _ => {}
+        }
+        
+        println!();
+    }
+    
+    Ok(())
+}
+
+fn run_interactive_mode() -> Result<()> {
+    print_banner();
+    
+    let mut ctx = InteractiveContext::default();
+    
+    loop {
+        println!("\n{}", style(format!("[ {} ]", ctx.status_line())).dim());
+        
+        let options = vec![
+            "📂 Scan Disk Image",
+            "💾 Recover Data",
+            "📅 Generate Timeline",
+            "📋 Manage Sessions",
+            "🚪 Exit",
+        ];
+        
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("What would you like to do?")
+            .items(&options)
+            .default(0)
+            .interact();
+        
+        match selection {
+            Ok(0) => { let _ = interactive_scan(&mut ctx); }
+            Ok(1) => { let _ = interactive_recover(&mut ctx); }
+            Ok(2) => { let _ = interactive_timeline(&mut ctx); }
+            Ok(3) => { let _ = interactive_sessions(&mut ctx); }
+            Ok(4) | Err(_) => {
+                println!("\n👋 Goodbye!\n");
+                break;
+            }
+            _ => {}
+        }
+    }
+    
+    Ok(())
+}
+
 fn main() -> Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
     let cli = Cli::parse();
-    match cli.command {
+    
+    // If no subcommand provided, run interactive mode
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => return run_interactive_mode(),
+    };
+    
+    match command {
         Commands::Scan {
             image,
             fs,
@@ -461,7 +1051,7 @@ fn main() -> Result<()> {
                     println!("   • Audit trail logging");
                 }
                 if forensics || verify_hash {
-                    let algo = match hash_algorithm.as_str() {
+                    let _algo = match hash_algorithm.as_str() {
                         "sha256" => ghostfs_core::HashAlgorithm::SHA256,
                         "sha512" => ghostfs_core::HashAlgorithm::SHA512,
                         "sha1" => ghostfs_core::HashAlgorithm::SHA1,

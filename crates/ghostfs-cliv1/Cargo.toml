@@ -1,0 +1,21 @@
+[package]
+name = "ghostfs-cliv1"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "ghostfs"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+atty = "0.2"
+clap = { version = "4", features = ["derive"] }
+dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+console = "0.15"
+indicatif = "0.17"
+shellexpand = "3"
+serde = { version = "1", features = ["derive"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+ghostfs-core = { path = "../ghostfs-core" }
+tracing-subscriber = "0.3"

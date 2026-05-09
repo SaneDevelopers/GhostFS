@@ -44,7 +44,7 @@ pub struct GapInfo {
 /// Partial file recovery engine
 pub struct PartialRecovery {
     /// Fragment matcher for finding related fragments
-    matcher: FragmentMatcher,
+    _matcher: FragmentMatcher,
 
     /// Minimum completeness threshold
     min_completeness: f32,
@@ -54,7 +54,7 @@ impl PartialRecovery {
     /// Create a new partial recovery engine
     pub fn new() -> Self {
         Self {
-            matcher: FragmentMatcher::new().with_min_confidence(0.4),
+            _matcher: FragmentMatcher::new().with_min_confidence(0.4),
             min_completeness: 0.3, // Recover if at least 30% of file is available
         }
     }

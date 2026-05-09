@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub mod forensics;
 pub mod fs;
 pub mod recovery;
+pub mod session;
 pub mod timeline;
 
 // Re-export key recovery types
@@ -29,6 +30,9 @@ pub use forensics::{
     AuditEntry, AuditEvent, AuditEventType, AuditLog, AuditLogger, FileHash, ForensicsConfig,
     ForensicsRecoveryReport, HashAlgorithm, HashManifest, HashVerification, VerificationStatus,
 };
+
+// Re-export session types
+pub use session::{SessionDatabase, SessionManager, SessionSummary};
 
 // Re-export XFS recovery config for advanced users
 pub use fs::xfs::XfsRecoveryConfig;

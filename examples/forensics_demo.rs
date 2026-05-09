@@ -3,12 +3,9 @@
 /// This example shows how to use the audit trail and hash verification
 /// features for legal compliance and evidence integrity.
 use ghostfs_core::{
-    calculate_file_hash, verify_file_integrity, AuditEvent, AuditEventType, AuditLog, AuditLogger,
-    HashAlgorithm, HashManifest,
+    calculate_file_hash, verify_file_integrity, AuditLog, AuditLogger, HashAlgorithm, HashManifest,
 };
 use std::fs;
-use std::io::Write;
-use std::path::Path;
 use std::sync::Arc;
 use tempfile::TempDir;
 

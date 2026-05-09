@@ -299,7 +299,8 @@ impl ReassemblyEngine {
             }
 
             if used.contains(&current) {
-                // Would link back to already-used fragment (not necessarily a cycle, but concerning)
+                // Would link back to already-used fragment — safety net in case
+                // the caller passes an ID that wasn't pre-filtered.
                 return true;
             }
 
@@ -370,23 +371,8 @@ impl ReassemblyEngine {
 
     /// Calculate simple proximity score based on disk location
     fn calculate_simple_proximity(&self, frag1: &Fragment, frag2: &Fragment) -> f32 {
-        let distance = if frag1.start_offset > frag2.start_offset {
-            frag1.start_offset - frag2.start_offset
-        } else {
-            frag2.start_offset - frag1.start_offset
-        };
-
-        // Score based on distance - closer fragments more likely related
-        const MB: u64 = 1024 * 1024;
-        if distance < 8192 {
-            1.0
-        } else if distance < MB {
-            0.7
-        } else if distance < 10 * MB {
-            0.4
-        } else {
-            0.1
-        }
+        // Reuse FragmentMatcher's spatial_proximity logic to avoid duplication
+        self.matcher.spatial_proximity(frag1, frag2)
     }
 
     /// Detect gaps between ordered fragments
@@ -631,21 +617,26 @@ mod tests {
 
         let engine = ReassemblyEngine::new(catalog);
 
-        let fragments = vec![frag1.clone(), frag2, frag3];
-        let mut used = HashSet::new();
-        used.insert(frag1.id);
+        // Use the locally constructed fragments for orphan finding.
+        let fragments = vec![frag1, frag2, frag3];
 
-        let ordered = vec![(0, frag1.id, MatchScore::calculate(1.0, 1.0, 1.0, 1.0))];
+        // Mark first fragment as used to test that find_best_orphan doesn't return it
+        let mut used: HashSet<FragmentId> = HashSet::new();
+        used.insert(fragments[0].id);
+        let ordered: Vec<(usize, FragmentId, MatchScore)> = Vec::new();
 
-        // Find best orphan - may or may not find one depending on confidence thresholds
-        // The key is that the function should run without errors
+        // The key is that the function should run without errors and never select
+        // a used fragment
         let orphan = engine.find_best_orphan(&fragments, &used, &ordered);
-        // We have 3 fragments, 1 is used, so we should have 2 candidates
-        // The function should at least execute successfully
-        assert!(
-            orphan.is_some() || orphan.is_none(),
-            "Function should complete"
-        );
+        // We have 3 fragments, 1 is used, so we should have 2 candidates.
+        // If an orphan is selected, it must not be a fragment that is already
+        // marked as used.
+        if let Some((_, id)) = orphan {
+            assert_ne!(
+                id, fragments[0].id,
+                "find_best_orphan must not return an already-used fragment"
+            );
+        }
     }
 
     #[test]
@@ -692,7 +683,7 @@ mod tests {
 
         // First fragment should be the one with the signature
         assert_eq!(
-            ordered[0].1, frag1.id,
+            ordered[0].1, fragments[0].id,
             "First fragment should have the file signature"
         );
     }

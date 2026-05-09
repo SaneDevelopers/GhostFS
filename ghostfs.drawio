@@ -1,0 +1,254 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="GhostFS Architecture">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1"
+      tooltips="1" connect="1" arrows="1" fold="1" page="1"
+      pageScale="1" pageWidth="1400" pageHeight="1200"
+      math="0" shadow="0">
+
+      <root>
+
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- INPUT -->
+
+        <mxCell
+          id="input"
+          value="&lt;b&gt;Input Device / Image&lt;/b&gt;&lt;br&gt;&lt;font style='font-size:14px'&gt;Raw disk image or block device&lt;/font&gt;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8ECE8;strokeColor=#B65A38;fontSize=22;fontStyle=1;"
+          vertex="1"
+          parent="1">
+
+          <mxGeometry x="430" y="40" width="360" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- DETECTION -->
+
+        <mxCell
+          id="detection"
+          value="&lt;b&gt;Filesystem Detection&lt;/b&gt;&lt;br&gt;&lt;font style='font-size:14px'&gt;Superblock &amp;amp; magic-value validation&lt;/font&gt;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1EFEA;strokeColor=#7A766E;fontSize=22;fontStyle=1;"
+          vertex="1"
+          parent="1">
+
+          <mxGeometry x="430" y="190" width="360" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- ADAPTER -->
+
+        <mxCell
+          id="adapter"
+          value="&lt;b&gt;Filesystem Adapter&lt;/b&gt;&lt;br&gt;&lt;font style='font-size:14px'&gt;Routes to matching extraction pipeline&lt;/font&gt;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F0FB;strokeColor=#3A74C8;fontSize=22;fontStyle=1;"
+          vertex="1"
+          parent="1">
+
+          <mxGeometry x="340" y="350" width="540" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- XFS -->
+
+        <mxCell
+          id="xfs"
+          value="&lt;b&gt;XFS&lt;/b&gt;&lt;br&gt;&lt;font style='font-size:14px'&gt;AG &amp;amp; inobt traversal&lt;/font&gt;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DFF3EC;strokeColor=#1C8B69;fontSize=22;fontStyle=1;"
+          vertex="1"
+          parent="1">
+
+          <mxGeometry x="70" y="550" width="260" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- BTRFS -->
+
+        <mxCell
+          id="btrfs"
+          value="&lt;b&gt;Btrfs&lt;/b&gt;&lt;br&gt;&lt;font style='font-size:14px'&gt;B-tree &amp;amp; snapshot scan&lt;/font&gt;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DFF3EC;strokeColor=#1C8B69;fontSize=22;fontStyle=1;"
+          vertex="1"
+          parent="1">
+
+          <mxGeometry x="470" y="550" width="260" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- exFAT -->
+
+        <mxCell
+          id="exfat"
+          value="&lt;b&gt;exFAT&lt;/b&gt;&lt;br&gt;&lt;font style='font-size:14px'&gt;FAT chain traversal&lt;/font&gt;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DFF3EC;strokeColor=#1C8B69;fontSize=22;fontStyle=1;"
+          vertex="1"
+          parent="1">
+
+          <mxGeometry x="870" y="550" width="260" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- SCANNING -->
+
+        <mxCell
+          id="scan"
+          value="&lt;b&gt;Scanning &amp;amp; Fragment Detection&lt;/b&gt;&lt;br&gt;&lt;font style='font-size:14px'&gt;Orphaned inodes &amp;amp; unreferenced extents&lt;/font&gt;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAF0DE;strokeColor=#AE7A16;fontSize=22;fontStyle=1;"
+          vertex="1"
+          parent="1">
+
+          <mxGeometry x="300" y="770" width="600" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- VALIDATION -->
+
+        <mxCell
+          id="validation"
+          value="&lt;b&gt;Content Validation&lt;/b&gt;&lt;br&gt;&lt;font style='font-size:14px'&gt;Signature matching &amp;amp; entropy analysis&lt;/font&gt;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAF0DE;strokeColor=#AE7A16;fontSize=22;fontStyle=1;"
+          vertex="1"
+          parent="1">
+
+          <mxGeometry x="300" y="940" width="600" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- RECONSTRUCTION -->
+
+        <mxCell
+          id="reconstruct"
+          value="&lt;b&gt;Reconstruction &amp;amp; Directory Building&lt;/b&gt;&lt;br&gt;&lt;font style='font-size:14px'&gt;Metadata, timestamps, directory paths&lt;/font&gt;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EFEEFD;strokeColor=#5A4ED1;fontSize=22;fontStyle=1;"
+          vertex="1"
+          parent="1">
+
+          <mxGeometry x="300" y="1110" width="600" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- INPUT TO DETECTION -->
+
+        <mxCell
+          id="e1"
+          style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=4;strokeColor=#8B8B8B;"
+          edge="1"
+          parent="1"
+          source="input"
+          target="detection">
+
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- DETECTION TO ADAPTER -->
+
+        <mxCell
+          id="e2"
+          style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=4;strokeColor=#8B8B8B;"
+          edge="1"
+          parent="1"
+          source="detection"
+          target="adapter">
+
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ADAPTER TO XFS -->
+
+        <mxCell
+          id="e3"
+          style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=4;strokeColor=#8B8B8B;"
+          edge="1"
+          parent="1"
+          source="adapter"
+          target="xfs">
+
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ADAPTER TO BTRFS -->
+
+        <mxCell
+          id="e4"
+          style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=4;strokeColor=#8B8B8B;"
+          edge="1"
+          parent="1"
+          source="adapter"
+          target="btrfs">
+
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ADAPTER TO EXFAT -->
+
+        <mxCell
+          id="e5"
+          style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=4;strokeColor=#8B8B8B;"
+          edge="1"
+          parent="1"
+          source="adapter"
+          target="exfat">
+
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- XFS TO SCAN -->
+
+        <mxCell
+          id="e6"
+          style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=4;strokeColor=#8B8B8B;"
+          edge="1"
+          parent="1"
+          source="xfs"
+          target="scan">
+
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- BTRFS TO SCAN -->
+
+        <mxCell
+          id="e7"
+          style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=4;strokeColor=#8B8B8B;"
+          edge="1"
+          parent="1"
+          source="btrfs"
+          target="scan">
+
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- EXFAT TO SCAN -->
+
+        <mxCell
+          id="e8"
+          style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=4;strokeColor=#8B8B8B;"
+          edge="1"
+          parent="1"
+          source="exfat"
+          target="scan">
+
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- SCAN TO VALIDATION -->
+
+        <mxCell
+          id="e9"
+          style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=4;strokeColor=#8B8B8B;"
+          edge="1"
+          parent="1"
+          source="scan"
+          target="validation">
+
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- VALIDATION TO RECONSTRUCTION -->
+
+        <mxCell
+          id="e10"
+          style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeWidth=4;strokeColor=#8B8B8B;"
+          edge="1"
+          parent="1"
+          source="validation"
+          target="reconstruct">
+
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

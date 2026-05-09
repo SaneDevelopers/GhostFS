@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ghostfs-core", "crates/ghostfs-cli"]
+members = ["crates/ghostfs-core", "crates/ghostfs-cli", "crates/ghostfs-cliv1"]
 resolver = "2"
 
 [workspace.dependencies]
